@@ -10,6 +10,7 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp .build/release/LazyStudio "$APP/Contents/MacOS/LazyStudio"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
+cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
 # Prefer a real Developer ID identity from the Keychain; fall back to ad-hoc.
 IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null \

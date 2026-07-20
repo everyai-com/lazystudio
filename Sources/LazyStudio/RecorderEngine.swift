@@ -52,6 +52,16 @@ final class RecorderEngine: NSObject, ObservableObject {
 
     func start() async {
         guard !isRecording else { return }
+
+        // Fail loudly and helpfully if Screen Recording isn't granted —
+        // a silent status line is how recordings get lost.
+        guard CGPreflightScreenCaptureAccess() else {
+            statusMessage = "Grant Screen Recording first"
+            CGRequestScreenCaptureAccess()
+            WelcomeWindow.show()
+            return
+        }
+
         statusMessage = "Starting…"
         do {
             let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
@@ -115,12 +125,17 @@ final class RecorderEngine: NSObject, ObservableObject {
         self.stream = nil
         self.recordingOutput = nil
         self.isRecording = false
-        self.statusMessage = "Saved"
-        guard let url = lastRecordingURL else { return }
+        guard let url = lastRecordingURL,
+              FileManager.default.fileExists(atPath: url.path) else {
+            statusMessage = "Recording failed — nothing was saved"
+            return
+        }
+        statusMessage = "Saved"
+        // Always reveal the raw file immediately — never leave the user
+        // wondering where their video went while AI polish runs.
+        NSWorkspace.shared.activateFileViewerSelecting([url])
         if autoPolish, let agent = agents.first {
             await aiEditor.polish(url: url, agent: agent)
-        } else {
-            NSWorkspace.shared.activateFileViewerSelecting([url])
         }
     }
 }
