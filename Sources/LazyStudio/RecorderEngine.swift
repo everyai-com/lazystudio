@@ -27,6 +27,7 @@ final class RecorderEngine: NSObject, ObservableObject {
     private var recordingOutput: SCRecordingOutput?
     private let cameraOverlay = CameraOverlayController()
     private let effectsOverlay = EffectsOverlayController()
+    private let recordingHUD = RecordingHUDController()
     private var editorObservation: AnyCancellable?
 
     override init() {
@@ -62,19 +63,24 @@ final class RecorderEngine: NSObject, ObservableObject {
             return
         }
 
+        // Show the native "choose what to share" picker (same one as
+        // Zoom/Meet) so clicking Record always visibly does something.
+        statusMessage = "Choose what to record…"
+        let picker = SCContentSharingPicker.shared
+        picker.add(self)
+        picker.isActive = true
+        picker.present()
+    }
+
+    /// Called once the user picks a screen/window/app in the system picker.
+    func beginRecording(filter: SCContentFilter) async {
+        guard !isRecording else { return }
         statusMessage = "Starting…"
         do {
-            let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-            guard let display = content.displays.first else {
-                statusMessage = "No display found"
-                return
-            }
-
-            let filter = SCContentFilter(display: display, excludingWindows: [])
-
             let config = SCStreamConfiguration()
-            config.width = display.width * 2
-            config.height = display.height * 2
+            let scale = CGFloat(filter.pointPixelScale)
+            config.width = Int(filter.contentRect.width * scale)
+            config.height = Int(filter.contentRect.height * scale)
             config.minimumFrameInterval = CMTime(value: 1, timescale: 60)
             config.showsCursor = true
             config.capturesAudio = includeSystemAudio
@@ -108,6 +114,9 @@ final class RecorderEngine: NSObject, ObservableObject {
 
             if showCamera { cameraOverlay.show() }
             if clickEffects { effectsOverlay.start() }
+            recordingHUD.show { [weak self] in
+                Task { await self?.stop() }
+            }
         } catch {
             statusMessage = "Failed: \(error.localizedDescription)"
         }
@@ -122,6 +131,8 @@ final class RecorderEngine: NSObject, ObservableObject {
         }
         cameraOverlay.hide()
         effectsOverlay.stop()
+        recordingHUD.hide()
+        SCContentSharingPicker.shared.isActive = false
         self.stream = nil
         self.recordingOutput = nil
         self.isRecording = false
@@ -150,3 +161,24 @@ extension RecorderEngine: SCStreamDelegate {
 }
 
 extension RecorderEngine: SCRecordingOutputDelegate {}
+
+extension RecorderEngine: SCContentSharingPickerObserver {
+    nonisolated func contentSharingPicker(_ picker: SCContentSharingPicker, didUpdateWith filter: SCContentFilter, for stream: SCStream?) {
+        picker.remove(self)
+        Task { @MainActor in await self.beginRecording(filter: filter) }
+    }
+
+    nonisolated func contentSharingPicker(_ picker: SCContentSharingPicker, didCancelFor stream: SCStream?) {
+        picker.remove(self)
+        Task { @MainActor in
+            self.statusMessage = "Cancelled"
+            SCContentSharingPicker.shared.isActive = false
+        }
+    }
+
+    nonisolated func contentSharingPickerStartDidFailWithError(_ error: Error) {
+        Task { @MainActor in
+            self.statusMessage = "Picker failed: \(error.localizedDescription)"
+        }
+    }
+}
