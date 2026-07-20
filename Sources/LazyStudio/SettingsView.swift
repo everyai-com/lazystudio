@@ -36,8 +36,20 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+
+            Section("Updates") {
+                LabeledContent("Version", value: recorder.updater.currentVersion)
+                HStack {
+                    Button("Check for Updates") {
+                        Task { await recorder.updater.check() }
+                    }
+                    Text(recorder.updater.status)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
         .formStyle(.grouped)
-        .frame(width: 460, height: 340)
+        .frame(width: 460, height: 440)
     }
 }

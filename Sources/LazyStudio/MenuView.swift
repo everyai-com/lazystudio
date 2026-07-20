@@ -65,6 +65,22 @@ struct MenuView: View {
             }
             .font(.caption)
 
+            if let version = recorder.updater.updateAvailable {
+                Button {
+                    Task { await recorder.updater.installUpdate() }
+                } label: {
+                    Label(
+                        recorder.updater.isWorking
+                            ? recorder.updater.status
+                            : "Update to \(version)",
+                        systemImage: "arrow.down.circle.fill"
+                    )
+                    .frame(maxWidth: .infinity)
+                }
+                .tint(.green)
+                .disabled(recorder.updater.isWorking)
+            }
+
             Divider()
 
             HStack {

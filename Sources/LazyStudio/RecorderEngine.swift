@@ -21,6 +21,7 @@ final class RecorderEngine: NSObject, ObservableObject {
     }
 
     let aiEditor = AIEditor()
+    let updater = Updater()
 
     private var stream: SCStream?
     private var recordingOutput: SCRecordingOutput?
@@ -31,9 +32,10 @@ final class RecorderEngine: NSObject, ObservableObject {
     override init() {
         super.init()
         // Forward AIEditor changes so the menu UI updates.
-        editorObservation = aiEditor.objectWillChange.sink { [weak self] _ in
-            self?.objectWillChange.send()
-        }
+        editorObservation = aiEditor.objectWillChange
+            .merge(with: updater.objectWillChange)
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+        updater.checkAutomatically()
         // Agent detection shells out (`command -v`), so keep it off the main thread.
         Task { [weak self] in
             let found = await Task.detached { AgentCLI.detectAll() }.value
