@@ -12,6 +12,7 @@ final class RecorderEngine: NSObject, ObservableObject {
     @Published var includeMicrophone = true
     @Published var includeSystemAudio = true
     @Published var showCamera = true
+    @Published var clickEffects = true
     @Published var lastRecordingURL: URL?
     @Published var statusMessage = "Ready"
     @Published var agents: [AgentCLI] = []
@@ -24,6 +25,7 @@ final class RecorderEngine: NSObject, ObservableObject {
     private var stream: SCStream?
     private var recordingOutput: SCRecordingOutput?
     private let cameraOverlay = CameraOverlayController()
+    private let effectsOverlay = EffectsOverlayController()
     private var editorObservation: AnyCancellable?
 
     override init() {
@@ -93,6 +95,7 @@ final class RecorderEngine: NSObject, ObservableObject {
             self.statusMessage = "Recording…"
 
             if showCamera { cameraOverlay.show() }
+            if clickEffects { effectsOverlay.start() }
         } catch {
             statusMessage = "Failed: \(error.localizedDescription)"
         }
@@ -106,6 +109,7 @@ final class RecorderEngine: NSObject, ObservableObject {
             statusMessage = "Stop failed: \(error.localizedDescription)"
         }
         cameraOverlay.hide()
+        effectsOverlay.stop()
         self.stream = nil
         self.recordingOutput = nil
         self.isRecording = false

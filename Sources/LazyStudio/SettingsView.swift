@@ -9,6 +9,7 @@ struct SettingsView: View {
                 Toggle("Microphone", isOn: $recorder.includeMicrophone)
                 Toggle("System Audio", isOn: $recorder.includeSystemAudio)
                 Toggle("Camera Bubble", isOn: $recorder.showCamera)
+                Toggle("Cursor Spotlight & Click Ripples", isOn: $recorder.clickEffects)
                 LabeledContent("Recordings folder") {
                     Text(recorder.recordingsDirectory.path)
                         .textSelection(.enabled)

@@ -11,7 +11,12 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp .build/release/LazyStudio "$APP/Contents/MacOS/LazyStudio"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 
-codesign --force --deep --sign - \
+# Prefer a real Developer ID identity from the Keychain; fall back to ad-hoc.
+IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null \
+  | grep -o '"Developer ID Application: [^"]*"' | head -1 | tr -d '"')
+SIGN="${IDENTITY:--}"
+echo "Signing with: ${IDENTITY:-ad-hoc}"
+codesign --force --options runtime --sign "$SIGN" \
   --entitlements Resources/LazyStudio.entitlements \
   "$APP" 2>/dev/null || codesign --force --deep --sign - "$APP"
 
