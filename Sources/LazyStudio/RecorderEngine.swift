@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 @preconcurrency import ScreenCaptureKit
 import AVFoundation
 import AppKit
@@ -13,10 +14,30 @@ final class RecorderEngine: NSObject, ObservableObject {
     @Published var showCamera = true
     @Published var lastRecordingURL: URL?
     @Published var statusMessage = "Ready"
+    @Published var agents: [AgentCLI] = []
+    @Published var autoPolish = UserDefaults.standard.object(forKey: "autoPolish") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(autoPolish, forKey: "autoPolish") }
+    }
+
+    let aiEditor = AIEditor()
 
     private var stream: SCStream?
     private var recordingOutput: SCRecordingOutput?
     private let cameraOverlay = CameraOverlayController()
+    private var editorObservation: AnyCancellable?
+
+    override init() {
+        super.init()
+        // Forward AIEditor changes so the menu UI updates.
+        editorObservation = aiEditor.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
+        // Agent detection shells out (`command -v`), so keep it off the main thread.
+        Task { [weak self] in
+            let found = await Task.detached { AgentCLI.detectAll() }.value
+            self?.agents = found
+        }
+    }
 
     var recordingsDirectory: URL {
         let dir = FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask)[0]
@@ -89,7 +110,10 @@ final class RecorderEngine: NSObject, ObservableObject {
         self.recordingOutput = nil
         self.isRecording = false
         self.statusMessage = "Saved"
-        if let url = lastRecordingURL {
+        guard let url = lastRecordingURL else { return }
+        if autoPolish, let agent = agents.first {
+            await aiEditor.polish(url: url, agent: agent)
+        } else {
             NSWorkspace.shared.activateFileViewerSelecting([url])
         }
     }

@@ -1,20 +1,13 @@
 import SwiftUI
 
+/// One big button. Everything else is automatic.
 struct MenuView: View {
     @EnvironmentObject var recorder: RecorderEngine
     @Environment(\.openSettings) private var openSettings
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Image(systemName: "sparkles.tv")
-                Text("LazyStudio").font(.headline)
-                Spacer()
-                Text(recorder.statusMessage)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
+        VStack(spacing: 14) {
+            // The button
             Button {
                 Task {
                     if recorder.isRecording {
@@ -24,52 +17,79 @@ struct MenuView: View {
                     }
                 }
             } label: {
-                Label(
-                    recorder.isRecording ? "Stop Recording" : "Start Recording",
-                    systemImage: recorder.isRecording ? "stop.circle.fill" : "record.circle"
-                )
+                VStack(spacing: 6) {
+                    Image(systemName: recorder.isRecording ? "stop.fill" : "record.circle.fill")
+                        .font(.system(size: 34))
+                    Text(recorder.isRecording ? "Stop" : "Record")
+                        .font(.title3.bold())
+                }
                 .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
             }
-            .keyboardShortcut("r")
-            .controlSize(.large)
+            .buttonStyle(.borderedProminent)
             .tint(recorder.isRecording ? .red : .accentColor)
+            .keyboardShortcut("r")
+            .disabled(recorder.aiEditor.isPolishing)
+
+            // Status line
+            if recorder.aiEditor.isPolishing {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text(recorder.aiEditor.stage)
+                        .font(.callout)
+                }
+            } else if !recorder.statusMessage.isEmpty, recorder.statusMessage != "Ready" {
+                Text(recorder.statusMessage)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+
+            // AI brain indicator — auto-detected, zero setup
+            HStack(spacing: 6) {
+                Image(systemName: "sparkles")
+                    .foregroundStyle(recorder.agents.isEmpty ? .secondary : Color.purple)
+                if let agent = recorder.agents.first {
+                    Text("Auto-polish with \(agent.displayName)")
+                } else {
+                    Text("Install Claude Code or Codex for AI polish")
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if !recorder.agents.isEmpty {
+                    Toggle("", isOn: $recorder.autoPolish)
+                        .toggleStyle(.switch)
+                        .controlSize(.mini)
+                        .labelsHidden()
+                }
+            }
+            .font(.caption)
 
             Divider()
 
-            Toggle("Microphone", isOn: $recorder.includeMicrophone)
-            Toggle("System Audio", isOn: $recorder.includeSystemAudio)
-            Toggle("Camera Bubble", isOn: $recorder.showCamera)
-                .disabled(recorder.isRecording)
+            HStack {
+                if let url = recorder.lastRecordingURL {
+                    Button {
+                        NSWorkspace.shared.activateFileViewerSelecting([url])
+                    } label: { Image(systemName: "folder") }
+                    .help("Show recordings")
 
-            Divider()
-
-            if let url = recorder.lastRecordingURL, !recorder.isRecording {
-                Button {
-                    NSWorkspace.shared.activateFileViewerSelecting([url])
-                } label: {
-                    Label("Show Last Recording", systemImage: "folder")
+                    if let agent = recorder.agents.first, !recorder.aiEditor.isPolishing {
+                        Button {
+                            Task { await recorder.aiEditor.polish(url: url, agent: agent) }
+                        } label: { Image(systemName: "wand.and.stars") }
+                        .help("Polish last recording")
+                    }
                 }
-                Button {
-                    // AI polish pipeline — see AIEditor.swift
-                    Task { await AIEditor.shared.polish(url: url) }
-                } label: {
-                    Label("AI Polish (coming soon)", systemImage: "wand.and.stars")
-                }
+                Spacer()
+                Button { openSettings() } label: { Image(systemName: "gearshape") }
+                    .help("Settings")
+                Button { NSApp.terminate(nil) } label: { Image(systemName: "power") }
+                    .help("Quit")
             }
-
-            Button {
-                openSettings()
-            } label: {
-                Label("Settings…", systemImage: "gearshape")
-            }
-
-            Button("Quit LazyStudio") {
-                NSApp.terminate(nil)
-            }
+            .buttonStyle(.borderless)
         }
-        .toggleStyle(.switch)
-        .controlSize(.small)
         .padding(14)
-        .frame(width: 260)
+        .frame(width: 250)
     }
 }

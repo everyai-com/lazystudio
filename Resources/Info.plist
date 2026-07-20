@@ -15,6 +15,8 @@
     <string>LazyStudio shows your camera in a floating bubble during recordings.</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>LazyStudio records your voice along with the screen.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>LazyStudio transcribes your recording on-device so AI can edit it.</string>
     <key>NSHighResolutionCapable</key><true/>
 </dict>
 </plist>

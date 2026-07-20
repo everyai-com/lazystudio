@@ -15,7 +15,7 @@ Screen Studio is beautiful but paid. OBS is powerful but complicated. Loom wants
 - 🖥️ **Native & lightweight** — Swift + SwiftUI + ScreenCaptureKit, lives in your menu bar
 - 🎙️ Screen + system audio + microphone in one recording (macOS 15 `SCRecordingOutput`, no virtual drivers)
 - 📷 Floating circular **camera bubble** (drag it anywhere, baked into the recording)
-- 🪄 **AI Polish** *(in progress)* — transcribe, cut silences & retakes, auto-zoom, chapters, YouTube title/description. Bring your own Claude/OpenAI key, or run fully local with whisper.cpp
+- 🪄 **AI Polish, zero setup** — LazyStudio auto-detects your installed **Claude Code / Codex / Gemini CLI** and uses it as the editing brain. No API keys, no new accounts: your existing subscription edits your videos. Transcription runs **on-device** with Apple Speech. After each recording it cuts silences & retakes and writes a YouTube title + description next to the polished .mp4
 - 📂 Recordings saved to `~/Movies/LazyStudio`
 
 ## Install / Build
@@ -39,19 +39,21 @@ Sources/LazyStudio/
 ├── RecorderEngine.swift  # ScreenCaptureKit capture → .mp4
 ├── CameraOverlay.swift   # Floating AVFoundation camera bubble
 ├── MenuView.swift        # Menu bar UI
-├── SettingsView.swift    # Recording + AI provider settings
-└── AIEditor.swift        # AI post-processing pipeline (WIP)
+├── SettingsView.swift    # Recording + AI settings
+├── AgentCLI.swift        # Auto-detects Claude Code / Codex / Gemini CLIs
+├── Transcriber.swift     # On-device Apple Speech transcription
+└── AIEditor.swift        # Transcript → agent edit plan → cut & export
 ```
 
 The plan (inspired by Cap's Studio mode and the Screen.studio clones): record **raw video + event metadata** (cursor positions, clicks, transcript), then apply all polish non-destructively in post via an AI-generated edit decision list.
 
 ## Roadmap
 
-- [ ] Whisper transcription (local via whisper.cpp)
-- [ ] AI edit decision list → AVFoundation composition export
+- [x] On-device transcription (Apple Speech)
+- [x] Agent-CLI edit plan → AVFoundation composition export (silence/retake cuts, title, description)
 - [ ] Auto-zoom from cursor/click events, smoothed cursor
 - [ ] Area/window selection, background & padding styling
-- [ ] OAuth login for Claude/ChatGPT subscriptions (instead of API keys)
+- [ ] Chapters + captions in export
 - [ ] Direct YouTube upload
 
 ## Inspiration & prior art

@@ -2,12 +2,10 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject var recorder: RecorderEngine
-    @AppStorage("aiProvider") private var aiProvider = "claude"
-    @AppStorage("aiAPIKey") private var aiAPIKey = ""
 
     var body: some View {
-        TabView {
-            Form {
+        Form {
+            Section("Recording") {
                 Toggle("Microphone", isOn: $recorder.includeMicrophone)
                 Toggle("System Audio", isOn: $recorder.includeSystemAudio)
                 Toggle("Camera Bubble", isOn: $recorder.showCamera)
@@ -17,22 +15,28 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .tabItem { Label("Recording", systemImage: "record.circle") }
 
-            Form {
-                Picker("Provider", selection: $aiProvider) {
-                    Text("Claude").tag("claude")
-                    Text("OpenAI").tag("openai")
-                    Text("Local (whisper.cpp)").tag("local")
+            Section("AI Polish") {
+                Toggle("Auto-polish after recording", isOn: $recorder.autoPolish)
+                if recorder.agents.isEmpty {
+                    Text("No AI agent found. Install Claude Code (`npm i -g @anthropic-ai/claude-code`) or Codex — LazyStudio detects them automatically and uses your existing subscription. No API keys needed.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(recorder.agents) { agent in
+                        LabeledContent(agent.displayName) {
+                            Text(agent.path)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Text("Transcription runs on-device with Apple Speech. The first detected agent plans the edit: silence cuts, retake removal, YouTube title & description.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-                SecureField("API Key", text: $aiAPIKey)
-                Text("Used for the AI Polish pipeline: transcription, silence cuts, auto-zoom, chapters, and YouTube title generation.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
-            .tabItem { Label("AI", systemImage: "wand.and.stars") }
         }
         .formStyle(.grouped)
-        .frame(width: 440, height: 260)
+        .frame(width: 460, height: 340)
     }
 }
