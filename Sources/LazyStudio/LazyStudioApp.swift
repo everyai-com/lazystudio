@@ -24,7 +24,22 @@ struct LazyStudioApp: App {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Only one copy at a time — relaunching just pings the running one.
+        let others = NSRunningApplication.runningApplications(
+            withBundleIdentifier: Bundle.main.bundleIdentifier ?? ""
+        ).filter { $0 != .current }
+        if !others.isEmpty {
+            NSApp.terminate(nil)
+            return
+        }
         // Menu bar app: no Dock icon.
         NSApp.setActivationPolicy(.accessory)
+        WelcomeWindow.showIfNeeded()
+    }
+
+    // Double-clicking the app in Finder again brings up the welcome window.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+        WelcomeWindow.show()
+        return true
     }
 }

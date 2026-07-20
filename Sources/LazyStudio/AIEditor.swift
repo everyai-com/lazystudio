@@ -48,6 +48,12 @@ final class AIEditor: ObservableObject {
             let notesURL = output.deletingPathExtension().appendingPathExtension("txt")
             try notes.write(to: notesURL, atomically: true, encoding: .utf8)
 
+            // Captions for YouTube (from the on-device transcript, remapped
+            // through the cuts so timestamps match the polished video).
+            let srtURL = output.deletingPathExtension().appendingPathExtension("srt")
+            try Self.srt(segments: segments, keep: plan.keep)
+                .write(to: srtURL, atomically: true, encoding: .utf8)
+
             stage = "Done"
             NSWorkspace.shared.activateFileViewerSelecting([output])
         } catch {
@@ -123,6 +129,48 @@ final class AIEditor: ObservableObject {
         ) else { throw PolishError.exportFailed }
         try await export.export(to: output, as: .mp4)
         return output
+    }
+
+    /// Build an SRT from word segments, mapping source timestamps into the
+    /// polished timeline (source time minus everything cut before it).
+    static func srt(segments: [TranscriptSegment], keep: [EditPlan.Range]) -> String {
+        func remap(_ t: Double) -> Double? {
+            var offset = 0.0
+            for r in keep {
+                if t >= r.start && t <= r.end { return offset + (t - r.start) }
+                if t > r.end { offset += r.end - r.start }
+            }
+            return nil
+        }
+        func stamp(_ t: Double) -> String {
+            let h = Int(t) / 3600, m = Int(t) % 3600 / 60, s = Int(t) % 60
+            let ms = Int((t - t.rounded(.down)) * 1000)
+            return String(format: "%02d:%02d:%02d,%03d", h, m, s, ms)
+        }
+
+        // Group words into ~4s caption lines.
+        var blocks: [(start: Double, end: Double, text: String)] = []
+        var words: [String] = []
+        var blockStart: Double?
+        var blockEnd = 0.0
+        for seg in segments {
+            guard let s = remap(seg.start), let e = remap(seg.end) else { continue }
+            if blockStart == nil { blockStart = s }
+            words.append(seg.text)
+            blockEnd = e
+            if e - (blockStart ?? e) >= 4 || words.count >= 12 {
+                blocks.append((blockStart!, blockEnd, words.joined(separator: " ")))
+                words = []
+                blockStart = nil
+            }
+        }
+        if let blockStart, !words.isEmpty {
+            blocks.append((blockStart, blockEnd, words.joined(separator: " ")))
+        }
+
+        return blocks.enumerated().map { i, b in
+            "\(i + 1)\n\(stamp(b.start)) --> \(stamp(b.end))\n\(b.text)\n"
+        }.joined(separator: "\n")
     }
 
     enum PolishError: LocalizedError {
