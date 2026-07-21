@@ -23,7 +23,20 @@ final class AIEditor: ObservableObject {
         isPolishing = true
         defer { isPolishing = false; stage = "" }
         stage = "Listening to your video…"
-        let segments = try await Transcriber.transcribe(url: url)
+        let segments: [TranscriptSegment]
+        do {
+            segments = try await Transcriber.transcribe(url: url)
+        } catch let e as Transcriber.TranscriberError {
+            throw e
+        } catch {
+            // Apple Speech throws a raw "no speech detected" error on
+            // silent videos — translate it for humans.
+            if error.localizedDescription.lowercased().contains("speech") {
+                throw PolishError.noSpeech
+            }
+            throw error
+        }
+        guard !segments.isEmpty else { throw PolishError.noSpeech }
         let transcript = Transcriber.promptText(from: segments)
         let duration = try await CMTimeGetSeconds(AVURLAsset(url: url).load(.duration))
         stage = "Thinking about the best parts…"
@@ -84,7 +97,10 @@ final class AIEditor: ObservableObject {
             lastTitle = plan.title
             lastDescription = plan.description
         } catch {
-            stage = "Failed: \(error.localizedDescription)"
+            let msg = error.localizedDescription.lowercased().contains("speech")
+                ? (PolishError.noSpeech.errorDescription ?? "No speech found")
+                : error.localizedDescription
+            stage = "Failed: \(msg)"
         }
     }
 
@@ -202,11 +218,12 @@ final class AIEditor: ObservableObject {
     }
 
     enum PolishError: LocalizedError {
-        case badPlan(String), exportFailed
+        case badPlan(String), exportFailed, noSpeech
         var errorDescription: String? {
             switch self {
             case .badPlan(let raw): "Couldn't parse the agent's edit plan: \(raw)"
             case .exportFailed: "Video export failed."
+            case .noSpeech: "I couldn't hear any talking in this video. AI editing works off your voice — record with the Voice toggle on and say a few words, then try again. You can still cut by hand on the strip below."
             }
         }
     }

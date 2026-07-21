@@ -496,7 +496,14 @@ struct LibraryView: View {
                     }
                 }
                 if !errorText.isEmpty {
-                    Text(errorText).font(.caption2).foregroundStyle(.red)
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: "info.circle.fill")
+                        Text(errorText)
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .padding(8)
+                    .background(.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
                 }
 
                 if let session, session.hasCuts {

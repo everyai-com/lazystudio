@@ -11,9 +11,12 @@ enum MainWindow {
     static weak var recorder: RecorderEngine?
     private static let delegate = MainWindowDelegate()
 
+    /// Camera preview belongs to the Record screen only.
+    static var paneIsRecord = true
+
     static func show() {
         guard let recorder else { return }
-        recorder.updateBubblePreview()
+        if paneIsRecord { recorder.updateBubblePreview() }
         if let window { window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); return }
         let hosting = NSHostingController(rootView: AppShellView(recorder: recorder))
         let w = NSWindow(contentViewController: hosting)
@@ -76,6 +79,12 @@ private struct AppShellView: View {
             List(Pane.allCases, selection: $pane) { p in
                 Label(p.rawValue, systemImage: p.icon)
                     .tag(p)
+            }
+            .onChange(of: pane) { _, p in
+                // Camera on only while you're on the Record screen.
+                MainWindow.paneIsRecord = p == .record
+                if p == .record { recorder.updateBubblePreview() }
+                else { recorder.hideBubblePreview() }
             }
             .navigationSplitViewColumnWidth(min: 170, ideal: 190, max: 230)
             .listStyle(.sidebar)
