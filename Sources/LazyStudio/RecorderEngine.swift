@@ -112,6 +112,7 @@ final class RecorderEngine: NSObject, ObservableObject {
     }
 
     private var isStarting = false
+    private var isFinishing = false
 
     // MARK: - Retake markers (⌘⇧X while recording)
 
@@ -125,6 +126,7 @@ final class RecorderEngine: NSObject, ObservableObject {
         retakeMarkers.append(Date().timeIntervalSince(started))
         NSSound(named: "Pop")?.play()
         statusMessage = "Retake marked (\(retakeMarkers.count))"
+        recordingHUD.noteRetake(count: retakeMarkers.count)
     }
 
     /// Sidecar file the editor reads: "<recording>.markers.json"
@@ -154,7 +156,7 @@ final class RecorderEngine: NSObject, ObservableObject {
 
     func start() async {
         // isStarting also blocks the double-press that used to wedge things.
-        guard !isRecording, !isStarting else { return }
+        guard !isRecording, !isStarting, !isFinishing else { return }
         isStarting = true
         defer { isStarting = false }
 
@@ -203,6 +205,14 @@ final class RecorderEngine: NSObject, ObservableObject {
             config.height = Int(filter.contentRect.height * scale)
             config.minimumFrameInterval = CMTime(value: 1, timescale: 60)
             config.showsCursor = true
+            // Social-friendly capture: sRGB so colors don't wash out when
+            // platforms convert from display P3; deeper queue = fewer dropped
+            // frames during busy scrolling; 48 kHz stereo is what YouTube,
+            // TikTok, and Instagram all normalize to.
+            config.colorSpaceName = CGColorSpace.sRGB
+            config.queueDepth = 8
+            config.sampleRate = 48_000
+            config.channelCount = 2
             config.capturesAudio = includeSystemAudio
             config.captureMicrophone = includeMicrophone
             if includeMicrophone {
@@ -244,6 +254,8 @@ final class RecorderEngine: NSObject, ObservableObject {
                 Task { await self?.stop() }
             }, onCancel: { [weak self] in
                 Task { await self?.cancelRecording() }
+            }, onRetake: { [weak self] in
+                self?.markRetake()
             })
         } catch {
             statusMessage = "Couldn't start: \(error.localizedDescription)"
@@ -255,6 +267,16 @@ final class RecorderEngine: NSObject, ObservableObject {
     func stop() async {
         guard let stream else { return }
         statusMessage = "Finishing…"
+        // Kill the recording UI the instant Stop is pressed — the mp4 still
+        // needs a few seconds to finalize, but the pill/bubble/spotlight
+        // lingering is what makes stopping FEEL slow.
+        recordingHUD.hide()
+        effectsOverlay.stop()
+        cameraOverlay.hide()
+        isRecording = false
+        isFinishing = true
+        defer { isFinishing = false }
+        MainWindow.showVideos()
         do {
             try await stream.stopCapture()
         } catch {

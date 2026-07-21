@@ -16,7 +16,9 @@ enum HotKeys {
             eventClass: OSType(kEventClassKeyboard),
             eventKind: UInt32(kEventHotKeyPressed)
         )
-        InstallEventHandler(GetApplicationEventTarget(), { _, event, _ in
+        // Dispatcher target, NOT application target — application target only
+        // sees events while we're frontmost, which is never true mid-recording.
+        InstallEventHandler(GetEventDispatcherTarget(), { _, event, _ in
             var id = EventHotKeyID()
             GetEventParameter(event, EventParamName(kEventParamDirectObject),
                               EventParamType(typeEventHotKeyID), nil,
@@ -38,7 +40,7 @@ enum HotKeys {
         RegisterEventHotKey(
             keyCode, UInt32(cmdKey | shiftKey),
             EventHotKeyID(signature: OSType(0x4C_5A_53_54), id: id), // "LZST"
-            GetApplicationEventTarget(), 0, &ref
+            GetEventDispatcherTarget(), 0, &ref
         )
         refs.append(ref)
     }

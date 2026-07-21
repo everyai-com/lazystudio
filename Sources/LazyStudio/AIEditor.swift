@@ -42,21 +42,25 @@ final class AIEditor: ObservableObject {
         let transcript = Transcriber.promptText(from: segments)
         let duration = try await CMTimeGetSeconds(AVURLAsset(url: url).load(.duration))
         stage = "Thinking about the best parts…"
+        // Title/description/social run on Apple's on-device model in parallel
+        // with the agent's edit plan — private, instant, and it still works
+        // when no agent CLI is installed. Agent copy is the fallback.
+        async let onDevice = OnDeviceWriter.socialPack(transcript: transcript)
         let plan = try await requestPlan(
             agent: agent, transcript: transcript, duration: duration,
             gaps: Self.gapReport(segments, duration: duration),
             markers: Self.retakeMarkers(for: url),
             instruction: instruction
         )
-        adoptSocial(plan)
+        adoptSocial(plan, preferring: await onDevice)
         return plan
     }
 
-    private func adoptSocial(_ plan: EditPlan) {
-        lastTitle = plan.title
-        lastDescription = plan.description
-        lastLinkedIn = plan.linkedin ?? ""
-        lastTweet = plan.tweet ?? ""
+    private func adoptSocial(_ plan: EditPlan, preferring pack: OnDeviceWriter.SocialPack? = nil) {
+        lastTitle = pack?.title.isEmpty == false ? pack!.title : plan.title
+        lastDescription = pack?.description.isEmpty == false ? pack!.description : plan.description
+        lastLinkedIn = pack?.linkedin.isEmpty == false ? pack!.linkedin : (plan.linkedin ?? "")
+        lastTweet = pack?.tweet.isEmpty == false ? pack!.tweet : (plan.tweet ?? "")
     }
 
     struct EditPlan: Decodable {
@@ -97,27 +101,31 @@ final class AIEditor: ObservableObject {
             let duration = try await CMTimeGetSeconds(AVURLAsset(url: url).load(.duration))
 
             stage = "Thinking about the best parts…"
+            // On-device Apple model writes the copy while the agent plans cuts.
+            async let onDevice = OnDeviceWriter.socialPack(transcript: transcript)
             let plan = try await requestPlan(
                 agent: agent, transcript: transcript, duration: duration,
                 gaps: Self.gapReport(segments, duration: duration),
                 markers: Self.retakeMarkers(for: url),
                 instruction: instruction
             )
+            let pack = await onDevice
+            adoptSocial(plan, preferring: pack)
 
             stage = "Snipping out the boring bits…"
             let output = try await applyCuts(source: url, plan: plan)
 
             // Post-everywhere pack: title, description, LinkedIn, tweet.
             var notes = """
-            \(plan.title)
+            \(lastTitle)
 
-            \(plan.description)
+            \(lastDescription)
             """
-            if let li = plan.linkedin, !li.isEmpty {
-                notes += "\n\n--- LinkedIn ---\n\(li)"
+            if !lastLinkedIn.isEmpty {
+                notes += "\n\n--- LinkedIn ---\n\(lastLinkedIn)"
             }
-            if let tw = plan.tweet, !tw.isEmpty {
-                notes += "\n\n--- X / Twitter ---\n\(tw)"
+            if !lastTweet.isEmpty {
+                notes += "\n\n--- X / Twitter ---\n\(lastTweet)"
             }
             let notesURL = output.deletingPathExtension().appendingPathExtension("txt")
             try notes.write(to: notesURL, atomically: true, encoding: .utf8)
@@ -130,7 +138,6 @@ final class AIEditor: ObservableObject {
 
             stage = "Done"
             lastPolishedURL = output
-            adoptSocial(plan)
         } catch {
             let msg = error.localizedDescription.lowercased().contains("speech")
                 ? (PolishError.noSpeech.errorDescription ?? "No speech found")
@@ -236,8 +243,11 @@ final class AIEditor: ObservableObject {
             .appendingPathExtension("polished.mp4")
         try? FileManager.default.removeItem(at: output)
 
+        // Honor the same "Optimized for social" switch as the manual export.
+        let social = UserDefaults.standard.object(forKey: "socialExport") as? Bool ?? true
         guard let export = AVAssetExportSession(
-            asset: composition, presetName: AVAssetExportPresetHighestQuality
+            asset: composition,
+            presetName: social ? AVAssetExportPreset1920x1080 : AVAssetExportPresetHighestQuality
         ) else { throw PolishError.exportFailed }
         try await export.export(to: output, as: .mp4)
         return output

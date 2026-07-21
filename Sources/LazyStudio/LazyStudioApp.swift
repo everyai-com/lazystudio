@@ -24,6 +24,32 @@ struct LazyStudioApp: App {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Headless caption test: `LazyStudio --test-captions <video>` runs the
+        // real transcribe → burn → export pipeline and quits. Dev-only.
+        let args = ProcessInfo.processInfo.arguments
+        if let i = args.firstIndex(of: "--test-captions"), args.count > i + 1 {
+            NSApp.setActivationPolicy(.prohibited)
+            let url = URL(fileURLWithPath: args[i + 1])
+            Task { @MainActor in
+                let session = EditSession(url: url)
+                await session.load()
+                var waited = 0
+                while session.isTranscribing || session.transcript.isEmpty {
+                    try? await Task.sleep(for: .milliseconds(200))
+                    waited += 1
+                    if waited > 600 { print("TEST FAILED: transcript timeout"); exit(1) }
+                }
+                print("TEST transcript words: \(session.transcript.count)")
+                do {
+                    let out = try await session.export(burnCaptions: true, social: true)
+                    print("TEST exported: \(out.path)")
+                } catch {
+                    print("TEST FAILED: \(error)")
+                }
+                exit(0)
+            }
+            return
+        }
         // Only one copy at a time — relaunching just pings the running one.
         let others = NSRunningApplication.runningApplications(
             withBundleIdentifier: Bundle.main.bundleIdentifier ?? ""

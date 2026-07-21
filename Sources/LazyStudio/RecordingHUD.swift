@@ -10,13 +10,17 @@ final class RecordingHUDController {
     private var startedAt = Date()
     private let model = HUDModel()
 
-    func show(onStop: @escaping () -> Void, onCancel: @escaping () -> Void = {}) {
+    func show(onStop: @escaping () -> Void,
+              onCancel: @escaping () -> Void = {},
+              onRetake: @escaping () -> Void = {}) {
         hide()
         guard let screen = NSScreen.main else { return }
         startedAt = Date()
         model.elapsed = "00:00"
+        model.retakeCount = 0
         model.onStop = onStop
         model.onCancel = onCancel
+        model.onRetake = onRetake
 
         let hosting = NSHostingController(rootView: HUDView(model: model))
         let panel = NSPanel(
@@ -55,6 +59,17 @@ final class RecordingHUDController {
         self.timer = timer
     }
 
+    /// Bump the retake badge and re-fit the pill (the count widens it).
+    func noteRetake(count: Int) {
+        model.retakeCount = count
+        guard let panel = window, let view = panel.contentViewController?.view else { return }
+        view.layoutSubtreeIfNeeded()
+        let size = view.fittingSize
+        let origin = NSPoint(x: panel.frame.midX - size.width / 2, y: panel.frame.origin.y)
+        panel.setContentSize(size)
+        panel.setFrameOrigin(origin)
+    }
+
     func hide() {
         timer?.invalidate()
         timer = nil
@@ -66,8 +81,10 @@ final class RecordingHUDController {
 @MainActor
 final class HUDModel: ObservableObject {
     @Published var elapsed = "00:00"
+    @Published var retakeCount = 0
     var onStop: () -> Void = {}
     var onCancel: () -> Void = {}
+    var onRetake: () -> Void = {}
 }
 
 private struct HUDView: View {
@@ -93,6 +110,19 @@ private struct HUDView: View {
             .buttonStyle(.borderedProminent)
             .tint(.red)
             .controlSize(.small)
+            Button {
+                model.onRetake()
+            } label: {
+                if model.retakeCount > 0 {
+                    Label("\(model.retakeCount)", systemImage: "arrow.uturn.backward")
+                        .font(.callout.bold())
+                } else {
+                    Image(systemName: "arrow.uturn.backward")
+                }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .help("Retake — mark the last take as bad; the AI cuts it (⌘⇧X)")
             Button {
                 model.onCancel()
             } label: {

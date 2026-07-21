@@ -320,14 +320,18 @@ final class EditSession: ObservableObject {
 
     /// Render exactly what the strip shows → "(edited).mp4" next to the raw
     /// file. Always writes an .srt; optionally burns styled subtitles in.
-    func export(burnCaptions: Bool = false) async throws -> URL {
+    func export(burnCaptions: Bool = false, social: Bool = false) async throws -> URL {
         isExporting = true
         defer { isExporting = false }
         let comp = try await Self.composition(asset: AVURLAsset(url: url), keep: keptRanges)
         let output = url.deletingPathExtension().appendingPathExtension("edited.mp4")
         try? FileManager.default.removeItem(at: output)
+        // Social: 1080p H.264 — retina captures are 4–5K wide and platforms
+        // just re-compress them badly; a clean 1080p upload looks sharper on
+        // YouTube/TikTok/Instagram and is a fraction of the size.
+        let preset = social ? AVAssetExportPreset1920x1080 : AVAssetExportPresetHighestQuality
         guard let exporter = AVAssetExportSession(
-            asset: comp, presetName: AVAssetExportPresetHighestQuality
+            asset: comp, presetName: preset
         ) else { throw AIEditor.PolishError.exportFailed }
 
         if burnCaptions, !transcript.isEmpty {
@@ -335,16 +339,68 @@ final class EditSession: ObservableObject {
         }
         try await exporter.export(to: output, as: .mp4)
 
-        // Sidecar captions for YouTube either way.
+        // Sidecar captions for YouTube (.srt) and web players (.vtt) either way.
         if !transcript.isEmpty {
             let srt = AIEditor.srt(segments: transcript, keep: keptRanges)
             try? srt.write(to: output.deletingPathExtension().appendingPathExtension("srt"),
+                           atomically: true, encoding: .utf8)
+            // WebVTT is the same cue list with dot milliseconds and a header.
+            let vtt = "WEBVTT\n\n" + srt.replacingOccurrences(
+                of: #"(\d{2}:\d{2}:\d{2}),(\d{3})"#, with: "$1.$2", options: .regularExpression
+            )
+            try? vtt.write(to: output.deletingPathExtension().appendingPathExtension("vtt"),
                            atomically: true, encoding: .utf8)
         }
         return output
     }
 
     // MARK: - Tasteful burned-in subtitles
+
+    /// The five caption looks that dominate social in 2026 — see export panel.
+    enum CaptionStyle: String, CaseIterable, Identifiable {
+        case boldPop   // dark rounded box, white heavy text, word pop-in (TikTok)
+        case hormozi   // huge white + black stroke, active word yellow (karaoke)
+        case outline   // classic bold white with thick black outline, no box
+        case pill      // yellow pill background, black text (CapCut style)
+        case minimal   // small clean lowercase, subtle, no animation
+
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .boldPop: "Bold Pop"
+            case .hormozi: "Hormozi"
+            case .outline: "Outline"
+            case .pill: "Yellow Pill"
+            case .minimal: "Minimal"
+            }
+        }
+        var uppercased: Bool { self != .minimal }
+        var weight: NSFont.Weight { self == .minimal ? .semibold : .heavy }
+        var sizeFactor: CGFloat {
+            switch self {
+            case .hormozi: 0.055
+            case .minimal: 0.032
+            default: 0.045
+            }
+        }
+        var strokes: Bool { self == .boldPop || self == .hormozi || self == .outline }
+        var textColor: NSColor { self == .pill ? .black : .white }
+        var boxColor: NSColor? {
+            switch self {
+            case .boldPop: NSColor.black.withAlphaComponent(0.55)
+            case .pill: NSColor.systemYellow
+            default: nil
+            }
+        }
+        /// Words appear as they're spoken vs whole block at once.
+        var popIn: Bool { self == .boldPop }
+        /// Karaoke: the word being spoken flips to this color.
+        var highlight: NSColor? { self == .hormozi ? .systemYellow : nil }
+
+        static var current: CaptionStyle {
+            CaptionStyle(rawValue: UserDefaults.standard.string(forKey: "captionStyle") ?? "") ?? .boldPop
+        }
+    }
 
     /// Map a source timestamp into the edited timeline (nil if cut).
     private func remap(_ t: Double) -> Double? {
@@ -356,24 +412,47 @@ final class EditSession: ObservableObject {
         return nil
     }
 
-    /// Short 3–4 word blocks, like good social captions — not paragraphs.
-    private func captionBlocks() -> [(start: Double, end: Double, text: String)] {
-        var blocks: [(Double, Double, String)] = []
-        var words: [String] = []
+    private struct CaptionWord { let start: Double; let text: String }
+    private struct CaptionBlock {
+        let start: Double
+        var end: Double
+        let words: [CaptionWord]
+    }
+
+    /// Short 3–5 word blocks, like good social captions — not paragraphs.
+    /// Splits on real pauses and sentence ends so blocks read naturally,
+    /// and keeps per-word timing for the TikTok-style pop-in.
+    private func captionBlocks() -> [CaptionBlock] {
+        var blocks: [CaptionBlock] = []
+        var words: [CaptionWord] = []
         var s: Double?
         var e = 0.0
+        func flush() {
+            guard let bs = s, !words.isEmpty else { return }
+            blocks.append(CaptionBlock(start: bs, end: max(e, bs + 0.9), words: words))
+            words = []; s = nil
+        }
         for seg in transcript {
             guard let rs = remap(seg.start), let re = remap(seg.end) else { continue }
+            // A real pause ends the block — captions shouldn't linger over silence.
+            if s != nil, rs - e > 0.8 { flush() }
             if s == nil { s = rs }
-            words.append(seg.text)
+            let clean = seg.text.trimmingCharacters(in: .whitespaces)
+            words.append(CaptionWord(
+                start: rs,
+                text: CaptionStyle.current.uppercased ? clean.uppercased() : clean
+            ))
             e = re
-            if words.count >= 4 || e - (s ?? e) >= 1.8 {
-                blocks.append((s!, max(e, s! + 0.6), words.joined(separator: " ")))
-                words = []; s = nil
-            }
+            let endsSentence = seg.text.hasSuffix(".") || seg.text.hasSuffix("?")
+                || seg.text.hasSuffix("!") || seg.text.hasSuffix(",")
+            if words.count >= 5 || e - (s ?? e) >= 2.2 || endsSentence { flush() }
         }
-        if let s, !words.isEmpty { blocks.append((s, max(e, s + 0.6), words.joined(separator: " "))) }
-        return blocks.map { (start: $0.0, end: $0.1, text: $0.2.uppercased()) }
+        flush()
+        // Never two blocks on screen at once.
+        for i in blocks.indices.dropLast() where blocks[i].end > blocks[i + 1].start {
+            blocks[i].end = blocks[i + 1].start
+        }
+        return blocks
     }
 
     private func captionComposition(for comp: AVMutableComposition) async throws -> AVMutableVideoComposition {
@@ -385,44 +464,131 @@ final class EditSession: ObservableObject {
         videoLayer.frame = parent.frame
         parent.addSublayer(videoLayer)
 
-        let fontSize = max(28, size.height * 0.045)
-        for block in captionBlocks() {
-            let text = CATextLayer()
-            text.string = NSAttributedString(string: block.text, attributes: [
-                .font: NSFont.systemFont(ofSize: fontSize, weight: .heavy),
-                .foregroundColor: NSColor.white,
-                .strokeColor: NSColor.black,
-                .strokeWidth: -3.0,
-            ])
-            text.alignmentMode = .center
-            text.contentsScale = 2
-            text.isWrapped = true
-            let w = min(size.width * 0.86,
-                        CGFloat(block.text.count) * fontSize * 0.62 + 48)
-            let h = fontSize * 1.7
-            text.cornerRadius = h / 4
-            text.backgroundColor = NSColor.black.withAlphaComponent(0.55).cgColor
-            text.frame = CGRect(x: (size.width - w) / 2, y: size.height * 0.07,
-                                width: w, height: h)
-            text.opacity = 0
+        let style = CaptionStyle.current
+        let fontSize = max(24, size.height * style.sizeFactor)
+        let font = NSFont.systemFont(ofSize: fontSize, weight: style.weight)
+        var attrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: style.textColor,
+        ]
+        if style.strokes {
+            attrs[.strokeColor] = NSColor.black
+            attrs[.strokeWidth] = -3.0
+        }
+        // Karaoke variant of the same word, in the highlight color.
+        var highlightAttrs = attrs
+        if let hi = style.highlight { highlightAttrs[.foregroundColor] = hi }
+        let spaceW = ("  " as NSString).size(withAttributes: [.font: font]).width
+        let lineH = fontSize * 1.35
+        let maxLineW = size.width * 0.86
+        let padX = fontSize * 0.7
+        let padY = fontSize * 0.45
 
-            let appear = CABasicAnimation(keyPath: "opacity")
-            appear.fromValue = 0
-            appear.toValue = 1
-            appear.duration = 0.12
-            appear.beginTime = AVCoreAnimationBeginTimeAtZero + block.start
-            appear.fillMode = .forwards
-            appear.isRemovedOnCompletion = false
-            let vanish = CABasicAnimation(keyPath: "opacity")
-            vanish.fromValue = 1
-            vanish.toValue = 0
-            vanish.duration = 0.1
-            vanish.beginTime = AVCoreAnimationBeginTimeAtZero + block.end
-            vanish.fillMode = .forwards
-            vanish.isRemovedOnCompletion = false
-            text.add(appear, forKey: "in")
-            text.add(vanish, forKey: "out")
-            parent.addSublayer(text)
+        func fade(_ from: Float, _ to: Float, at t: Double, dur: Double) -> CABasicAnimation {
+            let a = CABasicAnimation(keyPath: "opacity")
+            a.fromValue = from
+            a.toValue = to
+            a.duration = dur
+            a.beginTime = AVCoreAnimationBeginTimeAtZero + max(t, 0.001)
+            a.fillMode = .forwards
+            a.isRemovedOnCompletion = false
+            return a
+        }
+
+        // CATextLayer silently renders nothing inside AVAssetExportSession, so
+        // words are pre-rendered to bitmaps and shown via plain CALayers.
+        func rasterize(_ string: String, _ attrs: [NSAttributedString.Key: Any]) -> (image: CGImage, size: CGSize)? {
+            let str = NSAttributedString(string: string, attributes: attrs)
+            var s = str.size()
+            s = CGSize(width: ceil(s.width) + 8, height: ceil(s.height) + 8)
+            let scale: CGFloat = 2
+            guard let ctx = CGContext(
+                data: nil, width: Int(s.width * scale), height: Int(s.height * scale),
+                bitsPerComponent: 8, bytesPerRow: 0,
+                space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else { return nil }
+            ctx.scaleBy(x: scale, y: scale)
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: false)
+            str.draw(at: NSPoint(x: 4, y: 4))
+            NSGraphicsContext.restoreGraphicsState()
+            guard let img = ctx.makeImage() else { return nil }
+            return (img, s)
+        }
+
+        for block in captionBlocks() {
+            // Measure every word, wrap into up to two centered lines.
+            let measured = block.words.map { w in
+                (word: w, width: (w.text as NSString).size(withAttributes: attrs).width)
+            }
+            var lines: [[(word: CaptionWord, width: CGFloat)]] = [[]]
+            var lineW: CGFloat = 0
+            for m in measured {
+                if lineW > 0, lineW + spaceW + m.width > maxLineW {
+                    lines.append([]); lineW = 0
+                }
+                lines[lines.count - 1].append(m)
+                lineW += (lineW > 0 ? spaceW : 0) + m.width
+            }
+            let lineWidths = lines.map { line in
+                line.reduce(CGFloat(0)) { $0 + $1.width } + spaceW * CGFloat(max(0, line.count - 1))
+            }
+            let blockW = (lineWidths.max() ?? 0) + padX * 2
+            let blockH = lineH * CGFloat(lines.count) + padY * 2
+
+            // Container (a rounded backdrop when the style wants one)…
+            let box = CALayer()
+            box.frame = CGRect(x: (size.width - blockW) / 2, y: size.height * 0.07,
+                               width: blockW, height: blockH)
+            if let bg = style.boxColor {
+                box.backgroundColor = bg.cgColor
+                box.cornerRadius = min(blockH / 4, fontSize * 0.5)
+            }
+            box.opacity = 0
+            box.add(fade(0, 1, at: block.start, dur: 0.12), forKey: "in")
+            box.add(fade(1, 0, at: block.end, dur: 0.1), forKey: "out")
+            parent.addSublayer(box)
+
+            // …and each word pops in the moment it's spoken (TikTok-style).
+            var wordIndex = 0
+            for (li, line) in lines.enumerated() {
+                var x = (blockW - lineWidths[li]) / 2
+                // CALayer y grows upward: first line sits at the top.
+                let y = blockH - padY - lineH * CGFloat(li + 1)
+                for m in line {
+                    defer { wordIndex += 1 }
+                    guard let (img, imgSize) = rasterize(m.word.text, attrs) else { continue }
+                    let text = CALayer()
+                    text.contents = img
+                    text.contentsScale = 2
+                    // -4 offsets the rasterization padding so glyphs align.
+                    let frame = CGRect(x: x - 4, y: y - 4 + (lineH - imgSize.height + 8) / 2,
+                                       width: imgSize.width, height: imgSize.height)
+                    text.frame = frame
+                    text.opacity = 0
+                    let inAt = style.popIn ? max(block.start, m.word.start) : block.start
+                    text.add(fade(0, 1, at: inAt, dur: 0.08), forKey: "in")
+                    text.add(fade(1, 0, at: block.end, dur: 0.1), forKey: "out")
+                    box.addSublayer(text)
+
+                    // Karaoke: yellow copy of the word on top while it's spoken.
+                    if style.highlight != nil,
+                       let (hiImg, _) = rasterize(m.word.text, highlightAttrs) {
+                        let next = wordIndex + 1 < block.words.count
+                            ? block.words[wordIndex + 1].start : block.end
+                        let hi = CALayer()
+                        hi.contents = hiImg
+                        hi.contentsScale = 2
+                        hi.frame = frame
+                        hi.opacity = 0
+                        hi.add(fade(0, 1, at: max(block.start, m.word.start), dur: 0.05), forKey: "in")
+                        hi.add(fade(1, 0, at: next, dur: 0.08), forKey: "out")
+                        box.addSublayer(hi)
+                    }
+                    x += m.width + spaceW
+                }
+            }
         }
 
         videoComp.animationTool = AVVideoCompositionCoreAnimationTool(

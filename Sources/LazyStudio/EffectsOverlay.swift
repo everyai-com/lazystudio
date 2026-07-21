@@ -8,10 +8,8 @@ import QuartzCore
 @MainActor
 final class EffectsOverlayController {
     private var window: NSPanel?
-    private var clickMonitor: Any?
-    private var moveMonitor: Any?
-    private var localClickMonitor: Any?
-    private var localMoveMonitor: Any?
+    private var pollTimer: Timer?
+    private var wasPressed = false
     private var halo: CALayer?
 
     func start() {
@@ -53,42 +51,34 @@ final class EffectsOverlayController {
         content.layer?.addSublayer(halo)
         self.halo = halo
 
-        let follow: (NSEvent) -> Void = { [weak self] _ in
-            guard let self, let halo = self.halo else { return }
-            CATransaction.begin()
-            CATransaction.setAnimationDuration(0.06)
-            halo.position = self.flip(NSEvent.mouseLocation, in: screen)
-            CATransaction.commit()
+        // Poll instead of global event monitors: monitors need Accessibility
+        // permission and silently deliver nothing without it, which is how the
+        // spotlight ends up frozen. mouseLocation + pressedMouseButtons need
+        // no permission and work over every app.
+        wasPressed = false
+        let screenFrame = screen.frame
+        let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, let halo = self.halo else { return }
+                let p = Self.flip(NSEvent.mouseLocation, in: screenFrame)
+                CATransaction.begin()
+                CATransaction.setAnimationDuration(0.06)
+                halo.position = p
+                CATransaction.commit()
+                let pressed = NSEvent.pressedMouseButtons != 0
+                if pressed && !self.wasPressed {
+                    self.ripple(at: p, in: content)
+                }
+                self.wasPressed = pressed
+            }
         }
-        let clicked: (NSEvent) -> Void = { [weak self] _ in
-            guard let self else { return }
-            self.ripple(at: self.flip(NSEvent.mouseLocation, in: screen), in: content)
-        }
-
-        // Global monitors miss our own windows, so add local ones too.
-        moveMonitor = NSEvent.addGlobalMonitorForEvents(
-            matching: [.mouseMoved, .leftMouseDragged, .rightMouseDragged], handler: follow
-        )
-        localMoveMonitor = NSEvent.addLocalMonitorForEvents(
-            matching: [.mouseMoved, .leftMouseDragged]
-        ) { e in follow(e); return e }
-        clickMonitor = NSEvent.addGlobalMonitorForEvents(
-            matching: [.leftMouseDown, .rightMouseDown], handler: clicked
-        )
-        localClickMonitor = NSEvent.addLocalMonitorForEvents(
-            matching: [.leftMouseDown, .rightMouseDown]
-        ) { e in clicked(e); return e }
+        RunLoop.main.add(timer, forMode: .common)
+        pollTimer = timer
     }
 
     func stop() {
-        if let clickMonitor { NSEvent.removeMonitor(clickMonitor) }
-        if let moveMonitor { NSEvent.removeMonitor(moveMonitor) }
-        if let localClickMonitor { NSEvent.removeMonitor(localClickMonitor) }
-        if let localMoveMonitor { NSEvent.removeMonitor(localMoveMonitor) }
-        clickMonitor = nil
-        moveMonitor = nil
-        localClickMonitor = nil
-        localMoveMonitor = nil
+        pollTimer?.invalidate()
+        pollTimer = nil
         halo = nil
         window?.orderOut(nil)
         window = nil
@@ -96,7 +86,11 @@ final class EffectsOverlayController {
 
     /// NSEvent.mouseLocation is bottom-left origin; layers are top-left.
     private func flip(_ p: NSPoint, in screen: NSScreen) -> CGPoint {
-        CGPoint(x: p.x - screen.frame.minX, y: screen.frame.height - (p.y - screen.frame.minY))
+        Self.flip(p, in: screen.frame)
+    }
+
+    private static func flip(_ p: NSPoint, in frame: NSRect) -> CGPoint {
+        CGPoint(x: p.x - frame.minX, y: frame.height - (p.y - frame.minY))
     }
 
     /// Two expanding rings + a quick flash dot — reads clearly at any size.

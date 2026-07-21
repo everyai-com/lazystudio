@@ -78,6 +78,18 @@ struct LibraryView: View {
     @State private var exportedURL: URL?
     @State private var adoptedSession: EditSession?
     @AppStorage("burnCaptions") private var burnCaptions = true
+    @AppStorage("socialExport") private var socialExport = true
+    @AppStorage("captionStyle") private var captionStyle = EditSession.CaptionStyle.boldPop.rawValue
+
+    private var styleBlurb: String {
+        switch EditSession.CaptionStyle(rawValue: captionStyle) ?? .boldPop {
+        case .boldPop: "Dark rounded box, words pop in as spoken — the TikTok classic."
+        case .hormozi: "Big bold text, the spoken word flashes yellow — Hormozi karaoke."
+        case .outline: "Bold white with a thick black outline — works on any background."
+        case .pill: "Black text on a yellow pill — the CapCut viral look."
+        case .minimal: "Small, clean, lowercase — quiet captions for calm videos."
+        }
+    }
 
     init(recorder: RecorderEngine) {
         self.recorder = recorder
@@ -763,21 +775,44 @@ struct LibraryView: View {
                     .background(.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
                 }
 
-                if let session, session.hasCuts {
+                // Export is useful even with zero cuts — burning subtitles or
+                // making a social-sized file is reason enough.
+                if let session {
                     Toggle(isOn: $burnCaptions) {
                         Label("Stylish subtitles in the video", systemImage: "captions.bubble")
                             .font(.caption)
                     }
                     .toggleStyle(.switch)
                     .controlSize(.mini)
-                    Text("Bold, punchy captions burned in — plus a .srt file for YouTube either way.")
+                    Text("Bold, punchy captions burned in — plus .srt/.vtt files for YouTube either way.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                    if burnCaptions {
+                        Picker("Style", selection: $captionStyle) {
+                            ForEach(EditSession.CaptionStyle.allCases) { s in
+                                Text(s.label).tag(s.rawValue)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .controlSize(.small)
+                        Text(styleBlurb)
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                    Toggle(isOn: $socialExport) {
+                        Label("Optimized for social (1080p)", systemImage: "sparkles.tv")
+                            .font(.caption)
+                    }
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    Text("1080p H.264 — what YouTube, TikTok & Instagram want; looks sharper after their re-compression and uploads much faster. Off = full retina resolution.")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                     HStack {
                         Button {
                             Task {
                                 do {
-                                    let out = try await session.export(burnCaptions: burnCaptions)
+                                    let out = try await session.export(burnCaptions: burnCaptions, social: socialExport)
                                     exportedURL = out
                                     model.refresh(dir: recorder.recordingsDirectory)
                                     // Nudge when a long export finishes in the background.
