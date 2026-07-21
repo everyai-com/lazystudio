@@ -18,7 +18,11 @@ struct ChatEditorView: View {
         let id = UUID()
         let fromUser: Bool
         let text: String
+        var activity: String?   // "✂ Timeline updated — kept 29s of 62s"
     }
+
+    private let suggestions = ["Cut the silences", "Keep it under a minute",
+                               "Make it punchy", "Write me a title"]
 
     init(recorder: RecorderEngine) {
         self.recorder = recorder
@@ -78,25 +82,35 @@ struct ChatEditorView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 10) {
                         ForEach(messages) { msg in
-                            HStack {
-                                if msg.fromUser { Spacer(minLength: 30) }
-                                Text(msg.text)
-                                    .font(.callout)
-                                    .textSelection(.enabled)
-                                    .padding(10)
-                                    .background(
-                                        msg.fromUser ? Color.accentColor.opacity(0.15)
-                                                     : Color.purple.opacity(0.08),
-                                        in: RoundedRectangle(cornerRadius: 12)
-                                    )
-                                if !msg.fromUser { Spacer(minLength: 30) }
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    if msg.fromUser { Spacer(minLength: 30) }
+                                    Text(msg.text)
+                                        .font(.callout)
+                                        .textSelection(.enabled)
+                                        .padding(10)
+                                        .background(
+                                            msg.fromUser ? Color.accentColor.opacity(0.13)
+                                                         : Color.gray.opacity(0.09),
+                                            in: RoundedRectangle(cornerRadius: 12)
+                                        )
+                                    if !msg.fromUser { Spacer(minLength: 30) }
+                                }
+                                if let activity = msg.activity {
+                                    Label(activity, systemImage: "scissors")
+                                        .font(.caption2)
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 3)
+                                        .background(.purple.opacity(0.1), in: Capsule())
+                                        .foregroundStyle(.purple)
+                                }
                             }
                             .id(msg.id)
                         }
                         if busy {
                             HStack(spacing: 8) {
                                 ProgressView().controlSize(.small)
-                                Text("Editing… (watch the strip →)")
+                                Text("✦ Editing — using LazyStudio tools…")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -110,8 +124,25 @@ struct ChatEditorView: View {
             }
 
             Divider()
+            // Lovable-style suggestion chips
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(suggestions, id: \.self) { s in
+                        Button(s) {
+                            input = s
+                            send()
+                        }
+                        .font(.caption)
+                        .buttonStyle(.bordered)
+                        .buttonBorderShape(.capsule)
+                        .disabled(busy)
+                    }
+                }
+                .padding(.horizontal, 10)
+            }
+            .padding(.top, 8)
             HStack(spacing: 8) {
-                TextField("Tell the editor what to do…", text: $input, axis: .vertical)
+                TextField("Ask your editor…", text: $input, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(1...4)
                     .onSubmit { send() }
@@ -160,17 +191,57 @@ struct ChatEditorView: View {
         User request: \(text)
         """
 
+        let keptBefore = session.keptDuration
         Task {
             do {
-                let reply = try await agent.chat(message: prompt, followUp: followUp)
-                messages.append(ChatMessage(fromUser: false,
-                    text: reply.isEmpty ? "Done — check the strip on the right." : reply))
+                let reply: String
+                if agent.id == "claude" {
+                    // Claude Code drives our MCP tools directly.
+                    reply = try await agent.chat(message: prompt, followUp: followUp)
+                } else {
+                    // Codex CLI can't reach HTTP MCP servers yet — planner
+                    // mode: ChatGPT writes the plan, the app applies it.
+                    reply = try await plannerEdit(agent: agent, url: url,
+                                                  session: session, request: text)
+                }
+                var msg = ChatMessage(fromUser: false,
+                    text: reply.isEmpty ? "Done — check the strip on the right." : reply)
+                if abs(session.keptDuration - keptBefore) > 0.2 {
+                    msg.activity = String(format: "Timeline updated — kept %.0fs of %.0fs",
+                                          session.keptDuration, session.duration)
+                }
+                messages.append(msg)
             } catch {
                 messages.append(ChatMessage(fromUser: false,
-                    text: "That didn't work: \(error.localizedDescription)"))
+                    text: "That didn't work: \(error.localizedDescription). Try again, or check the AI connection in My Videos → any video."))
             }
             busy = false
         }
+    }
+
+    /// ChatGPT plans, LazyStudio applies — used when the brain is Codex.
+    private func plannerEdit(agent: AgentCLI, url: URL,
+                             session: EditSession, request: String) async throws -> String {
+        let plan = try await recorder.aiEditor.makePlan(
+            url: url, agent: agent, instruction: request
+        )
+        await session.apply(keep: plan.keep, cuts: plan.cuts)
+        var lines: [String] = []
+        if let cuts = plan.cuts, !cuts.isEmpty {
+            let described = cuts.prefix(6).map {
+                String(format: "%d:%02d–%d:%02d %@",
+                       Int($0.start) / 60, Int($0.start) % 60,
+                       Int($0.end) / 60, Int($0.end) % 60, $0.reason)
+            }.joined(separator: ", ")
+            lines.append("Made \(cuts.count) cut\(cuts.count == 1 ? "" : "s"): \(described).")
+        } else {
+            lines.append("Trimmed it down.")
+        }
+        lines.append(String(format: "Now %.0fs instead of %.0fs.",
+                            session.keptDuration, session.duration))
+        if !plan.title.isEmpty { lines.append("Title idea: “\(plan.title)”") }
+        lines.append("Happy? Hit Export in My Videos — or tell me what to change.")
+        return lines.joined(separator: " ")
     }
 
     // MARK: - Live preview

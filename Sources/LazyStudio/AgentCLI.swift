@@ -148,6 +148,10 @@ struct AgentCLI: Identifiable, Sendable {
                 continuation.resume(throwing: error)
                 return
             }
+            // Never hang forever — a stuck agent gets killed and reported.
+            DispatchQueue.global().asyncAfter(deadline: .now() + 300) {
+                if proc.isRunning { proc.terminate() }
+            }
             // Drain the pipe WHILE the process runs — reading only after exit
             // deadlocks once the agent prints more than the 64KB pipe buffer.
             DispatchQueue.global(qos: .userInitiated).async {
