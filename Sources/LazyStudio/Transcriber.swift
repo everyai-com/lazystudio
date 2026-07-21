@@ -12,6 +12,66 @@ struct TranscriptSegment: Sendable {
 
 enum Transcriber {
     static func transcribe(url: URL) async throws -> [TranscriptSegment] {
+        // macOS 26+: Apple's SpeechAnalyzer (~2% WER, beats Whisper).
+        // Falls back to the classic engine on older systems or any error.
+        if #available(macOS 26.0, *) {
+            do {
+                let segs = try await transcribeModern(url: url)
+                if !segs.isEmpty { return segs }
+            } catch {
+                lslog("SpeechAnalyzer failed, falling back: \(error.localizedDescription)")
+            }
+        }
+        return try await transcribeLegacy(url: url)
+    }
+
+    @available(macOS 26.0, *)
+    private static func transcribeModern(url: URL) async throws -> [TranscriptSegment] {
+        let locale = await SpeechTranscriber.supportedLocale(
+            equivalentTo: Locale.current
+        ) ?? Locale(identifier: "en_US")
+        let transcriber = SpeechTranscriber(
+            locale: locale,
+            transcriptionOptions: [],
+            reportingOptions: [],
+            attributeOptions: [.audioTimeRange]
+        )
+        // First run downloads the on-device model.
+        if let request = try await AssetInventory.assetInstallationRequest(
+            supporting: [transcriber]
+        ) {
+            try await request.downloadAndInstall()
+        }
+        let analyzer = SpeechAnalyzer(modules: [transcriber])
+        let file = try AVAudioFile(forReading: url)
+
+        let collector = Task { () -> [TranscriptSegment] in
+            var segs: [TranscriptSegment] = []
+            for try await result in transcriber.results where result.isFinal {
+                for run in result.text.runs {
+                    guard let timeRange = run.audioTimeRange else { continue }
+                    let word = String(result.text[run.range].characters)
+                        .trimmingCharacters(in: .whitespaces)
+                    guard !word.isEmpty else { continue }
+                    segs.append(TranscriptSegment(
+                        start: timeRange.start.seconds,
+                        end: timeRange.end.seconds,
+                        text: word
+                    ))
+                }
+            }
+            return segs.sorted { $0.start < $1.start }
+        }
+
+        if let lastSample = try await analyzer.analyzeSequence(from: file) {
+            try await analyzer.finalizeAndFinish(through: lastSample)
+        } else {
+            await analyzer.cancelAndFinishNow()
+        }
+        return try await collector.value
+    }
+
+    private static func transcribeLegacy(url: URL) async throws -> [TranscriptSegment] {
         let status = await withCheckedContinuation { cont in
             SFSpeechRecognizer.requestAuthorization { cont.resume(returning: $0) }
         }
