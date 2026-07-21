@@ -16,6 +16,8 @@ final class AIEditor: ObservableObject {
     @Published var lastPolishedURL: URL?
     @Published var lastTitle = ""
     @Published var lastDescription = ""
+    /// Sticky failure reason — `stage` gets cleared on exit, this doesn't.
+    @Published var lastError = ""
 
     /// Plan-only path for the editor: transcribe + ask the agent, return the
     /// keep-ranges without exporting. The editor strip visualizes the plan.
@@ -64,6 +66,7 @@ final class AIEditor: ObservableObject {
         isPolishing = true
         lastPolishedURL = nil
         lastTitle = ""
+        lastError = ""
         defer { isPolishing = false; stage = "" }
         do {
             stage = "Listening to your video…"
@@ -105,6 +108,7 @@ final class AIEditor: ObservableObject {
                 ? (PolishError.noSpeech.errorDescription ?? "No speech found")
                 : error.localizedDescription
             stage = "Failed: \(msg)"
+            lastError = msg
         }
     }
 

@@ -58,6 +58,29 @@ private final class MainWindowDelegate: NSObject, NSWindowDelegate {
     }
 }
 
+/// AI Edit pane: chat editor (Lovable-style) with a Batch mode tab.
+private struct AIEditPane: View {
+    let recorder: RecorderEngine
+    @State private var mode = "chat"
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Picker("", selection: $mode) {
+                Text("Chat").tag("chat")
+                Text("Batch").tag("batch")
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 200)
+            .padding(.top, 10)
+            if mode == "chat" {
+                ChatEditorView(recorder: recorder)
+            } else {
+                BatchEditView(recorder: recorder)
+            }
+        }
+    }
+}
+
 /// Full app shell: sidebar navigation like Loom's desktop app.
 private struct AppShellView: View {
     let recorder: RecorderEngine
@@ -103,7 +126,7 @@ private struct AppShellView: View {
             case .videos:
                 LibraryView(recorder: recorder)
             case .edit:
-                BatchEditView(recorder: recorder)
+                AIEditPane(recorder: recorder)
             }
         }
     }

@@ -105,7 +105,9 @@ struct BatchEditView: View {
             for url in urls {
                 status[url] = "Editing…"
                 await editor.polish(url: url, agent: agent, instruction: extra)
-                status[url] = editor.lastPolishedURL != nil ? "Done ✨" : "Failed"
+                status[url] = editor.lastPolishedURL != nil
+                    ? "Done ✨"
+                    : "Failed: \(editor.lastError.isEmpty ? "unknown" : editor.lastError)"
             }
             running = false
             model.refresh(dir: recorder.recordingsDirectory)

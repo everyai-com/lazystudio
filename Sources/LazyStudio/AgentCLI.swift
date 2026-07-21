@@ -91,7 +91,46 @@ struct AgentCLI: Identifiable, Sendable {
         case "gemini": args = ["-p", prompt, "-m", "gemini-2.5-flash"]
         default:       args = ["-p", prompt]
         }
+        return try await runArgs(args)
+    }
 
+    /// Chat turn with LazyStudio's own MCP server attached — the agent can
+    /// call set_keep_ranges etc. and the app updates live (Lovable-style).
+    func chat(message: String, followUp: Bool) async throws -> String {
+        let mcpJSON = #"{"mcpServers":{"lazystudio":{"type":"http","url":"http://127.0.0.1:19790/mcp"}}}"#
+        var args: [String]
+        switch id {
+        case "claude":
+            args = ["-p", message,
+                    "--mcp-config", mcpJSON, "--strict-mcp-config",
+                    "--dangerously-skip-permissions"]
+            if followUp { args.append("--continue") }
+        case "codex":
+            args = ["exec", "--skip-git-repo-check",
+                    "-c", "mcp_servers.lazystudio.url=\"http://127.0.0.1:19790/mcp\"",
+                    message]
+        default:
+            args = ["-p", message]
+        }
+        let raw = try await runArgs(args)
+        return Self.cleanChatOutput(raw)
+    }
+
+    /// Codex exec prefixes logs/banners; keep the substance.
+    static func cleanChatOutput(_ raw: String) -> String {
+        let junk = ["OpenAI Codex", "workdir:", "model:", "provider:", "approval:",
+                    "sandbox:", "reasoning", "tokens used", "session id", "--------"]
+        let lines = raw.split(separator: "\n", omittingEmptySubsequences: false)
+            .filter { line in
+                let l = line.trimmingCharacters(in: .whitespaces)
+                if l.hasPrefix("[") { return false }
+                return !junk.contains { l.localizedCaseInsensitiveContains($0) }
+            }
+        return lines.joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func runArgs(_ args: [String]) async throws -> String {
         return try await withCheckedThrowingContinuation { continuation in
             let proc = Process()
             proc.executableURL = URL(fileURLWithPath: path)
