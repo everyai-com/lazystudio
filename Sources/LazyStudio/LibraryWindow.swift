@@ -342,12 +342,11 @@ struct LibraryView: View {
                     PlayerView(player: session.player)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .background(Color.black)
-                        .overlay(alignment: .bottom) {
+                        .overlay {
                             // Live subtitle preview: picking a style shows it
                             // right here, no export needed.
                             if burnCaptions {
                                 CaptionPreviewOverlay(session: session)
-                                    .padding(.bottom, 26)
                                     .allowsHitTesting(false)
                             }
                         }
@@ -960,36 +959,50 @@ struct CaptionPreviewOverlay: View {
     @AppStorage("captionSize") private var sizeRaw = "M"
 
     var body: some View {
-        let style = EditSession.CaptionStyle(rawValue: styleRaw) ?? .boldPop
-        if let cap = session.liveCaption(at: session.playhead) {
-            let visible = cap.words.filter { !style.popIn || $0.spoken }
-            if !visible.isEmpty {
-                text(for: visible, style: style)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, style.boxColor != nil ? 14 : 0)
-                    .padding(.vertical, style.boxColor != nil ? 8 : 0)
-                    .background {
-                        if let bg = style.boxColor {
-                            RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: bg))
-                        }
+        // Find where the letterboxed video really is, and pin the caption
+        // 7% up from ITS bottom edge — exactly where the export burns it.
+        GeometryReader { geo in
+            let style = EditSession.CaptionStyle(rawValue: styleRaw) ?? .boldPop
+            let vs = session.videoSize
+            let scale = min(geo.size.width / vs.width, geo.size.height / vs.height)
+            let fitted = CGSize(width: vs.width * scale, height: vs.height * scale)
+            let bottomInset = (geo.size.height - fitted.height) / 2 + fitted.height * 0.07
+
+            if let cap = session.liveCaption(at: session.playhead) {
+                let visible = cap.words.filter { !style.popIn || $0.spoken }
+                if !visible.isEmpty {
+                    VStack {
+                        Spacer()
+                        text(for: visible, style: style, videoHeight: fitted.height)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, style.boxColor != nil ? 12 : 0)
+                            .padding(.vertical, style.boxColor != nil ? 6 : 0)
+                            .background {
+                                if let bg = style.boxColor {
+                                    RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: bg))
+                                }
+                            }
+                            .frame(maxWidth: fitted.width * 0.86)
+                            .padding(.bottom, bottomInset)
                     }
-                    .padding(.horizontal, 20)
+                    .frame(maxWidth: .infinity)
+                }
             }
         }
     }
 
     private func text(for words: [(text: String, spoken: Bool, current: Bool)],
-                      style: EditSession.CaptionStyle) -> some View {
+                      style: EditSession.CaptionStyle, videoHeight: CGFloat) -> some View {
         let joined = words.reduce(Text("")) { acc, w in
             let color: Color = w.current && style.highlight != nil
                 ? Color(nsColor: style.highlight!) : Color(nsColor: style.textColor)
             let piece = Text(w.text).foregroundColor(color)
             return acc == Text("") ? piece : acc + Text(" ") + piece
         }
-        let base: CGFloat = style == .hormozi ? 26 : style == .minimal ? 14 : 20
+        // Same proportions as the burn: fraction of video height × user size.
+        let size = max(9, videoHeight * style.sizeFactor * EditSession.CaptionStyle.sizeMultiplier)
         return joined
-            .font(.system(size: base * EditSession.CaptionStyle.sizeMultiplier,
-                          weight: style.weight == .heavy ? .heavy : .semibold))
+            .font(.system(size: size, weight: style.weight == .heavy ? .heavy : .semibold))
             .shadow(color: style.strokes ? .black : .clear, radius: 1, x: 1, y: 1)
             .shadow(color: style.strokes ? .black : .clear, radius: 1, x: -1, y: -1)
     }

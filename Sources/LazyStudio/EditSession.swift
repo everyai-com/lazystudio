@@ -20,6 +20,9 @@ final class EditSession: ObservableObject {
     let url: URL
     let player = AVPlayer()
     @Published var duration: Double = 0
+    /// Natural pixel size — the preview uses it to find where the video
+    /// actually sits inside the letterboxed player.
+    @Published var videoSize = CGSize(width: 16, height: 9)
     @Published var segments: [Segment] = []
     @Published var isExporting = false
     @Published var filmstrip: [NSImage] = []
@@ -41,6 +44,10 @@ final class EditSession: ObservableObject {
     func load() async {
         let asset = AVURLAsset(url: url)
         duration = (try? await CMTimeGetSeconds(asset.load(.duration))) ?? 0
+        if let track = try? await asset.loadTracks(withMediaType: .video).first,
+           let sz = try? await track.load(.naturalSize), sz.width > 0, sz.height > 0 {
+            videoSize = sz
+        }
         segments = [Segment(start: 0, end: max(duration, 0.1), kept: true)]
         player.replaceCurrentItem(with: AVPlayerItem(asset: asset))
         loadFilmstrip()

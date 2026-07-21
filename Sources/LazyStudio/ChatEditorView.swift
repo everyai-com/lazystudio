@@ -307,11 +307,10 @@ private struct SessionPreview: View {
             PlayerView(player: session.player)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color.black)
-                .overlay(alignment: .bottom) {
+                .overlay {
                     // Same live subtitle preview as My Videos.
                     if burnCaptions {
                         CaptionPreviewOverlay(session: session)
-                            .padding(.bottom, 22)
                             .allowsHitTesting(false)
                     }
                 }
