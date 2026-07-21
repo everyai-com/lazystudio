@@ -59,14 +59,35 @@ struct AgentCLI: Identifiable, Sendable {
         return out.isEmpty ? nil : out
     }
 
+    /// Is this agent actually signed in? (Codex has a real status command;
+    /// its exit code is always 0, so parse the text.)
+    func isLoggedIn() async -> Bool {
+        guard id == "codex" else { return true }
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: path)
+        proc.arguments = ["login", "status"]
+        let pipe = Pipe()
+        proc.standardOutput = pipe
+        proc.standardError = pipe
+        do { try proc.run() } catch { return false }
+        return await withCheckedContinuation { cont in
+            DispatchQueue.global(qos: .utility).async {
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                proc.waitUntilExit()
+                let out = String(decoding: data, as: UTF8.self).lowercased()
+                cont.resume(returning: !out.contains("not logged in"))
+            }
+        }
+    }
+
     /// Run a one-shot prompt through this agent and return its text output.
     func run(prompt: String) async throws -> String {
-        // Always use the cheapest model — an edit plan is an easy task,
-        // and this keeps the user's subscription usage near zero.
+        // Cheapest model where the flag is reliable; codex keeps its default —
+        // a pinned model id that stops existing breaks every edit.
         let args: [String]
         switch id {
         case "claude": args = ["-p", "--model", "haiku", prompt]
-        case "codex":  args = ["exec", "--skip-git-repo-check", "-m", "gpt-5-mini", prompt]
+        case "codex":  args = ["exec", "--skip-git-repo-check", prompt]
         case "gemini": args = ["-p", prompt, "-m", "gemini-2.5-flash"]
         default:       args = ["-p", prompt]
         }

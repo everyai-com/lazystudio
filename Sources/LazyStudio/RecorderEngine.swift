@@ -31,6 +31,19 @@ final class RecorderEngine: NSObject, ObservableObject {
         agents.first { $0.id == selectedAgentID } ?? agents.first
     }
 
+    /// agent id → signed in? Refreshed whenever the app becomes active,
+    /// so finishing `codex login` in Terminal updates the UI on your way back.
+    @Published var agentLoggedIn: [String: Bool] = [:]
+
+    func refreshAgentLogins() {
+        for agent in agents {
+            Task { [weak self] in
+                let ok = await agent.isLoggedIn()
+                self?.agentLoggedIn[agent.id] = ok
+            }
+        }
+    }
+
     /// Open Terminal with the agent's login command (Codex = ChatGPT account,
     /// Claude Code = Claude account) — no API keys anywhere.
     static func openLogin(for agentID: String) {
@@ -71,6 +84,13 @@ final class RecorderEngine: NSObject, ObservableObject {
         Task { [weak self] in
             let found = await Task.detached { AgentCLI.detectAll() }.value
             self?.agents = found
+            self?.refreshAgentLogins()
+        }
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.refreshAgentLogins() }
         }
     }
 

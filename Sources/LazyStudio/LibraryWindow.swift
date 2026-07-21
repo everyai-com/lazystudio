@@ -429,16 +429,34 @@ struct LibraryView: View {
                         recorder.selectedAgentID = recorder.agents.first?.id ?? ""
                     }
                 }
-                Button {
-                    RecorderEngine.openLogin(for: recorder.selectedAgentID)
-                } label: {
-                    Label(
-                        recorder.selectedAgentID == "codex"
-                            ? "Log in with ChatGPT" : "Log in / check account",
-                        systemImage: "person.crop.circle.badge.checkmark"
-                    )
+                // Live connection status — green means edits will work.
+                let loggedIn = recorder.agentLoggedIn[recorder.selectedAgentID] ?? true
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(loggedIn ? Color.green : Color.orange)
+                        .frame(width: 8, height: 8)
+                    Text(loggedIn
+                         ? "Connected — ready to edit"
+                         : "Not logged in yet")
+                        .font(.caption)
+                        .foregroundStyle(loggedIn ? .secondary : .primary)
                 }
-                .font(.caption)
+                if !loggedIn {
+                    Button {
+                        RecorderEngine.openLogin(for: recorder.selectedAgentID)
+                    } label: {
+                        Label(
+                            recorder.selectedAgentID == "codex"
+                                ? "Log in with ChatGPT" : "Log in",
+                            systemImage: "person.crop.circle.badge.checkmark"
+                        )
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    Text("Finish the login in Terminal, then come back — this turns green by itself.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
 
                 Divider()
 

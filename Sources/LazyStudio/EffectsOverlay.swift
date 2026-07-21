@@ -10,6 +10,8 @@ final class EffectsOverlayController {
     private var window: NSPanel?
     private var clickMonitor: Any?
     private var moveMonitor: Any?
+    private var localClickMonitor: Any?
+    private var localMoveMonitor: Any?
     private var halo: CALayer?
 
     func start() {
@@ -33,41 +35,60 @@ final class EffectsOverlayController {
         panel.orderFrontRegardless()
         window = panel
 
-        // Cursor spotlight
-        let haloSize: CGFloat = 90
-        let halo = CALayer()
+        // Cursor spotlight: soft radial glow, not a hard-edged disc.
+        let haloSize: CGFloat = 130
+        let halo = CAGradientLayer()
+        halo.type = .radial
+        halo.colors = [
+            NSColor.systemYellow.withAlphaComponent(0.32).cgColor,
+            NSColor.systemYellow.withAlphaComponent(0.10).cgColor,
+            NSColor.clear.cgColor,
+        ]
+        halo.locations = [0, 0.55, 1]
+        halo.startPoint = CGPoint(x: 0.5, y: 0.5)
+        halo.endPoint = CGPoint(x: 1, y: 1)
         halo.bounds = CGRect(x: 0, y: 0, width: haloSize, height: haloSize)
         halo.cornerRadius = haloSize / 2
-        halo.backgroundColor = NSColor.systemYellow.withAlphaComponent(0.18).cgColor
-        halo.borderColor = NSColor.systemYellow.withAlphaComponent(0.35).cgColor
-        halo.borderWidth = 1.5
         halo.position = flip(NSEvent.mouseLocation, in: screen)
         content.layer?.addSublayer(halo)
         self.halo = halo
 
-        moveMonitor = NSEvent.addGlobalMonitorForEvents(
-            matching: [.mouseMoved, .leftMouseDragged]
-        ) { [weak self] _ in
+        let follow: (NSEvent) -> Void = { [weak self] _ in
             guard let self, let halo = self.halo else { return }
             CATransaction.begin()
-            CATransaction.setAnimationDuration(0.12)
+            CATransaction.setAnimationDuration(0.06)
             halo.position = self.flip(NSEvent.mouseLocation, in: screen)
             CATransaction.commit()
         }
-
-        clickMonitor = NSEvent.addGlobalMonitorForEvents(
-            matching: [.leftMouseDown, .rightMouseDown]
-        ) { [weak self] _ in
+        let clicked: (NSEvent) -> Void = { [weak self] _ in
             guard let self else { return }
             self.ripple(at: self.flip(NSEvent.mouseLocation, in: screen), in: content)
         }
+
+        // Global monitors miss our own windows, so add local ones too.
+        moveMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.mouseMoved, .leftMouseDragged, .rightMouseDragged], handler: follow
+        )
+        localMoveMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.mouseMoved, .leftMouseDragged]
+        ) { e in follow(e); return e }
+        clickMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown], handler: clicked
+        )
+        localClickMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown]
+        ) { e in clicked(e); return e }
     }
 
     func stop() {
         if let clickMonitor { NSEvent.removeMonitor(clickMonitor) }
         if let moveMonitor { NSEvent.removeMonitor(moveMonitor) }
+        if let localClickMonitor { NSEvent.removeMonitor(localClickMonitor) }
+        if let localMoveMonitor { NSEvent.removeMonitor(localMoveMonitor) }
         clickMonitor = nil
         moveMonitor = nil
+        localClickMonitor = nil
+        localMoveMonitor = nil
         halo = nil
         window?.orderOut(nil)
         window = nil
@@ -78,33 +99,55 @@ final class EffectsOverlayController {
         CGPoint(x: p.x - screen.frame.minX, y: screen.frame.height - (p.y - screen.frame.minY))
     }
 
+    /// Two expanding rings + a quick flash dot — reads clearly at any size.
     private func ripple(at point: CGPoint, in view: NSView) {
-        let size: CGFloat = 44
-        let layer = CALayer()
-        layer.bounds = CGRect(x: 0, y: 0, width: size, height: size)
-        layer.cornerRadius = size / 2
-        layer.position = point
-        layer.borderColor = NSColor.systemBlue.cgColor
-        layer.borderWidth = 3
-        layer.opacity = 0.9
-        view.layer?.addSublayer(layer)
+        func ring(_ delay: Double, width: CGFloat, to scale: Double, duration: Double) {
+            let size: CGFloat = 46
+            let layer = CALayer()
+            layer.bounds = CGRect(x: 0, y: 0, width: size, height: size)
+            layer.cornerRadius = size / 2
+            layer.position = point
+            layer.borderColor = NSColor.systemYellow.cgColor
+            layer.borderWidth = width
+            layer.opacity = 0
+            view.layer?.addSublayer(layer)
 
-        let scale = CABasicAnimation(keyPath: "transform.scale")
-        scale.fromValue = 0.3
-        scale.toValue = 2.2
-        let fade = CABasicAnimation(keyPath: "opacity")
-        fade.fromValue = 0.9
-        fade.toValue = 0.0
-        let group = CAAnimationGroup()
-        group.animations = [scale, fade]
-        group.duration = 0.5
-        group.timingFunction = CAMediaTimingFunction(name: .easeOut)
-        group.isRemovedOnCompletion = false
-        group.fillMode = .forwards
-        layer.add(group, forKey: "ripple")
+            let grow = CABasicAnimation(keyPath: "transform.scale")
+            grow.fromValue = 0.25
+            grow.toValue = scale
+            let fade = CAKeyframeAnimation(keyPath: "opacity")
+            fade.values = [0, 0.95, 0]
+            fade.keyTimes = [0, 0.15, 1]
+            let group = CAAnimationGroup()
+            group.animations = [grow, fade]
+            group.duration = duration
+            group.beginTime = CACurrentMediaTime() + delay
+            group.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            group.isRemovedOnCompletion = false
+            group.fillMode = .forwards
+            layer.add(group, forKey: "ripple")
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay + duration + 0.05) {
+                layer.removeFromSuperlayer()
+            }
+        }
+        ring(0, width: 3.5, to: 2.4, duration: 0.45)
+        ring(0.08, width: 2, to: 3.1, duration: 0.55)
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
-            layer.removeFromSuperlayer()
+        let dot = CALayer()
+        dot.bounds = CGRect(x: 0, y: 0, width: 14, height: 14)
+        dot.cornerRadius = 7
+        dot.position = point
+        dot.backgroundColor = NSColor.systemYellow.withAlphaComponent(0.9).cgColor
+        view.layer?.addSublayer(dot)
+        let dotFade = CABasicAnimation(keyPath: "opacity")
+        dotFade.fromValue = 0.9
+        dotFade.toValue = 0
+        dotFade.duration = 0.3
+        dotFade.isRemovedOnCompletion = false
+        dotFade.fillMode = .forwards
+        dot.add(dotFade, forKey: "fade")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            dot.removeFromSuperlayer()
         }
     }
 }
