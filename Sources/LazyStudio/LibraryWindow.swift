@@ -182,49 +182,93 @@ struct LibraryView: View {
     }
 
     private func videoCard(_ item: VideoItem) -> some View {
-        Button {
-            model.selected = item
-        } label: {
-            VStack(alignment: .leading, spacing: 6) {
-                ZStack(alignment: .bottomTrailing) {
-                    Group {
-                        if let thumb = model.thumbnails[item.url] {
-                            Image(nsImage: thumb).resizable().scaledToFill()
-                        } else {
-                            Rectangle().fill(.quaternary)
-                        }
-                    }
-                    .frame(height: 118)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    if let d = model.durations[item.url], d > 0 {
-                        Text(String(format: "%d:%02d", Int(d) / 60, Int(d) % 60))
-                            .font(.caption2.bold().monospacedDigit())
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(.black.opacity(0.7), in: Capsule())
-                            .foregroundStyle(.white)
-                            .padding(6)
-                    }
-                }
-                HStack(spacing: 4) {
-                    if item.isPolished {
-                        Image(systemName: "sparkles")
-                            .font(.caption2)
-                            .foregroundStyle(.purple)
-                    }
-                    Text(item.name)
-                        .font(.callout.weight(.medium))
-                        .lineLimit(1)
-                }
-                Text(item.date.formatted(date: .abbreviated, time: .shortened))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .buttonStyle(.plain)
+        VideoCard(item: item, model: model)
     }
 
     // MARK: - Editor screen
+
+    private struct VideoCard: View {
+        let item: VideoItem
+        @ObservedObject var model: LibraryModel
+        @State private var hovering = false
+
+        var body: some View {
+            Button {
+                model.selected = item
+            } label: {
+                VStack(alignment: .leading, spacing: 0) {
+                    ZStack {
+                        Group {
+                            if let thumb = model.thumbnails[item.url] {
+                                Image(nsImage: thumb).resizable().scaledToFill()
+                            } else {
+                                Rectangle().fill(.quaternary)
+                                    .overlay(Image(systemName: "film")
+                                        .foregroundStyle(.tertiary))
+                            }
+                        }
+                        .frame(height: 124)
+                        .clipped()
+
+                        // Hover: darken + play affordance
+                        Rectangle()
+                            .fill(.black.opacity(hovering ? 0.35 : 0))
+                        Image(systemName: "play.circle.fill")
+                            .font(.system(size: 38))
+                            .foregroundStyle(.white)
+                            .opacity(hovering ? 1 : 0)
+                            .scaleEffect(hovering ? 1 : 0.7)
+                    }
+                    .overlay(alignment: .bottomTrailing) {
+                        if let d = model.durations[item.url], d > 0 {
+                            Text(String(format: "%d:%02d", Int(d) / 60, Int(d) % 60))
+                                .font(.caption2.bold().monospacedDigit())
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(.black.opacity(0.7), in: Capsule())
+                                .foregroundStyle(.white)
+                                .padding(6)
+                        }
+                    }
+                    .overlay(alignment: .topLeading) {
+                        if item.isPolished {
+                            Label("AI edited", systemImage: "sparkles")
+                                .font(.caption2.bold())
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(Theme.brandGradient, in: Capsule())
+                                .foregroundStyle(.white)
+                                .padding(6)
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.name)
+                            .font(.callout.weight(.semibold))
+                            .lineLimit(1)
+                        Text(item.date.formatted(date: .abbreviated, time: .shortened))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .background(.background.opacity(0.6))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder(hovering ? Theme.purple.opacity(0.5) : .primary.opacity(0.07),
+                                      lineWidth: hovering ? 1.5 : 1)
+                )
+                .shadow(color: .black.opacity(hovering ? 0.18 : 0.07),
+                        radius: hovering ? 12 : 6, y: hovering ? 6 : 3)
+                .scaleEffect(hovering ? 1.02 : 1)
+                .animation(.spring(duration: 0.25), value: hovering)
+            }
+            .buttonStyle(.plain)
+            .onHover { hovering = $0 }
+        }
+    }
 
     private func editorScreen(item: VideoItem, session: EditSession) -> some View {
         VStack(spacing: 0) {

@@ -103,8 +103,30 @@ private struct AppShellView: View {
     var body: some View {
         NavigationSplitView {
             List(Pane.allCases, selection: $pane) { p in
-                Label(p.rawValue, systemImage: p.icon)
-                    .tag(p)
+                Label {
+                    Text(p.rawValue)
+                } icon: {
+                    Image(systemName: p.icon)
+                        .foregroundStyle(pane == p ? Theme.purple : Color.secondary)
+                }
+                .tag(p)
+            }
+            .safeAreaInset(edge: .top) {
+                HStack(spacing: 8) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Theme.brandGradient)
+                            .frame(width: 30, height: 30)
+                        Image(systemName: "sparkles.tv.fill")
+                            .font(.footnote)
+                            .foregroundStyle(.white)
+                    }
+                    Text("LazyStudio")
+                        .font(.headline)
+                    Spacer()
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
             }
             .onChange(of: pane) { _, p in
                 // Camera on only while you're on the Record screen.
@@ -144,64 +166,81 @@ private struct MainView: View {
     }
 
     var body: some View {
-        VStack(spacing: 10) {
-            HStack(spacing: 8) {
-                Image(systemName: "sparkles.tv.fill")
-                    .foregroundStyle(.purple)
-                Text("lazystudio")
-                    .font(.title3.bold())
-                Spacer()
+        ZStack {
+            // Ambient brand glow behind the card.
+            RadialGradient(
+                colors: [Theme.purple.opacity(0.18), .clear],
+                center: .center, startRadius: 20, endRadius: 420
+            )
+            .ignoresSafeArea()
+
+            VStack(spacing: 12) {
+                VStack(spacing: 4) {
+                    ZStack {
+                        Circle()
+                            .fill(Theme.brandGradient)
+                            .frame(width: 54, height: 54)
+                            .shadow(color: Theme.purple.opacity(0.5), radius: 12, y: 4)
+                        Image(systemName: "sparkles.tv.fill")
+                            .font(.title2)
+                            .foregroundStyle(.white)
+                    }
+                    Text("LazyStudio")
+                        .font(.title2.bold())
+                    Text("Record lazily. Ship polished.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.bottom, 6)
+
+                VStack(spacing: 8) {
+                    sourceRow("display", "Full screen", nil)
+                    sourceRow("video.fill", "Camera", $recorder.showCamera)
+                    sourceRow("mic.fill", "Microphone", $recorder.includeMicrophone)
+                    sourceRow("speaker.wave.2.fill", "Computer sound", $recorder.includeSystemAudio)
+                    sourceRow("cursorarrow.rays", "Highlight clicks", $recorder.clickEffects)
+                    if recorder.showCamera {
+                        sourceRow("arrow.left.arrow.right", "Mirror camera", $mirrorCamera)
+                    }
+                }
+
+                Button {
+                    Task { await recorder.start() }
+                } label: {
+                    Label("Start Recording", systemImage: "record.circle.fill")
+                }
+                .buttonStyle(RecordButtonStyle())
+                .keyboardShortcut(.defaultAction)
+                .disabled(editor.isPolishing || recorder.isRecording)
+                .padding(.top, 8)
+
+                // Status / polish progress
+                if editor.isPolishing {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text(editor.stage)
+                    }
+                    .font(.callout)
+                } else if !recorder.statusMessage.isEmpty,
+                          !["Ready", "Saved"].contains(recorder.statusMessage) {
+                    Text(recorder.statusMessage)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
+            .padding(22)
+            .frame(width: 320)
+            .lsCard(radius: 22)
+            .overlay(alignment: .topTrailing) {
                 Button { openSettings() } label: {
                     Image(systemName: "gearshape")
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
+                .padding(12)
             }
-            .padding(.bottom, 2)
-
-            sourceRow("display", "Full screen", nil)
-            sourceRow("video.fill", "Camera", $recorder.showCamera)
-            sourceRow("mic.fill", "Microphone", $recorder.includeMicrophone)
-            sourceRow("speaker.wave.2.fill", "Computer sound", $recorder.includeSystemAudio)
-            sourceRow("cursorarrow.rays", "Highlight clicks", $recorder.clickEffects)
-            if recorder.showCamera {
-                sourceRow("arrow.left.arrow.right", "Mirror camera", $mirrorCamera)
-            }
-
-            Button {
-                Task { await recorder.start() }
-            } label: {
-                Text("Start Recording")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-            }
-            .buttonStyle(.borderedProminent)
-            .buttonBorderShape(.capsule)
-            .tint(Color(red: 0.92, green: 0.36, blue: 0.25))
-            .controlSize(.large)
-            .keyboardShortcut(.defaultAction)
-            .disabled(editor.isPolishing || recorder.isRecording)
-            .padding(.top, 6)
-
-            // Status / polish progress
-            if editor.isPolishing {
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
-                    Text(editor.stage)
-                }
-                .font(.callout)
-            } else if !recorder.statusMessage.isEmpty,
-                      !["Ready", "Saved"].contains(recorder.statusMessage) {
-                Text(recorder.statusMessage)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
-
         }
-        .padding(16)
-        .frame(width: 300)
         .onChange(of: recorder.showCamera) { _, _ in
             recorder.updateBubblePreview()
         }
@@ -212,32 +251,35 @@ private struct MainView: View {
 
     /// Loom-style pill row. Pass nil binding for a fixed label row.
     private func sourceRow(_ icon: String, _ name: String, _ on: Binding<Bool>?) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: icon)
-                .frame(width: 20)
-                .foregroundStyle((on?.wrappedValue ?? true) ? .primary : .secondary)
+        let active = on?.wrappedValue ?? true
+        return HStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(active ? Theme.purple.opacity(0.15) : Color.gray.opacity(0.12))
+                    .frame(width: 28, height: 28)
+                Image(systemName: icon)
+                    .font(.caption)
+                    .foregroundStyle(active ? Theme.purple : .secondary)
+            }
             Text(name)
-                .foregroundStyle((on?.wrappedValue ?? true) ? .primary : .secondary)
+                .font(.callout.weight(.medium))
+                .foregroundStyle(active ? .primary : .secondary)
             Spacer()
             if let on {
-                Button {
-                    on.wrappedValue.toggle()
-                } label: {
-                    Text(on.wrappedValue ? "On" : "Off")
-                        .font(.caption.bold())
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
-                        .background(
-                            on.wrappedValue ? Color.green.opacity(0.85) : Color.gray.opacity(0.35),
-                            in: Capsule()
-                        )
-                        .foregroundStyle(.white)
-                }
-                .buttonStyle(.plain)
+                Toggle("", isOn: on)
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .labelsHidden()
+                    .tint(Theme.purple)
+            } else {
+                Image(systemName: "checkmark")
+                    .font(.caption.bold())
+                    .foregroundStyle(Theme.purple)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(.quaternary.opacity(0.4), in: Capsule())
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 12))
+        .animation(.easeOut(duration: 0.15), value: active)
     }
 }
