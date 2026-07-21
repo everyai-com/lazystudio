@@ -81,6 +81,15 @@ final class RecorderEngine: NSObject, ObservableObject {
         }
         MainWindow.recorder = self
         MCPServer.shared.start(recorder: self)
+        // System-wide hotkeys: ⌘⇧R record/stop, ⌘⇧X retake marker.
+        HotKeys.install()
+        HotKeys.onRecordToggle = { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                if self.isRecording { await self.stop() } else { await self.start() }
+            }
+        }
+        HotKeys.onRetakeMarker = { [weak self] in self?.markRetake() }
         // Agent detection shells out (`command -v`), so keep it off the main thread.
         Task { [weak self] in
             let found = await Task.detached { AgentCLI.detectAll() }.value
@@ -103,6 +112,32 @@ final class RecorderEngine: NSObject, ObservableObject {
     }
 
     private var isStarting = false
+
+    // MARK: - Retake markers (⌘⇧X while recording)
+
+    private var recordingStartedAt: Date?
+    private var retakeMarkers: [Double] = []
+
+    /// "That take was bad" — stamp the moment; the AI cuts the flubbed
+    /// sentence right before each marker during the edit.
+    func markRetake() {
+        guard isRecording, let started = recordingStartedAt else { return }
+        retakeMarkers.append(Date().timeIntervalSince(started))
+        NSSound(named: "Pop")?.play()
+        statusMessage = "Retake marked (\(retakeMarkers.count))"
+    }
+
+    /// Sidecar file the editor reads: "<recording>.markers.json"
+    static func markersURL(for recording: URL) -> URL {
+        recording.deletingPathExtension().appendingPathExtension("markers.json")
+    }
+
+    private func saveMarkers(for url: URL) {
+        guard !retakeMarkers.isEmpty else { return }
+        if let data = try? JSONEncoder().encode(retakeMarkers) {
+            try? data.write(to: Self.markersURL(for: url))
+        }
+    }
 
     /// Show/hide the live camera bubble outside of recording so you can
     /// position yourself before pressing Record (Loom-style).
@@ -201,6 +236,8 @@ final class RecorderEngine: NSObject, ObservableObject {
             self.lastRecordingURL = url
             self.isRecording = true
             self.statusMessage = "Recording…"
+            self.recordingStartedAt = Date()
+            self.retakeMarkers = []
 
             if clickEffects { effectsOverlay.start() }
             recordingHUD.show(onStop: { [weak self] in
@@ -241,6 +278,7 @@ final class RecorderEngine: NSObject, ObservableObject {
             statusMessage = "Recording failed — nothing was saved"
             return
         }
+        saveMarkers(for: url)
         statusMessage = "Saved"
         // Straight into the editor with the fresh video selected —
         // recorder and editor are the same app, no window shuffle.

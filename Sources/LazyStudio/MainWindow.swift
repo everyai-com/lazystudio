@@ -198,6 +198,7 @@ private struct MainView: View {
                     if recorder.showCamera {
                         sourceRow("arrow.left.arrow.right", "Mirror camera", $mirrorCamera)
                     }
+                    prompterRow
                 }
 
                 Button {
@@ -244,6 +245,34 @@ private struct MainView: View {
         .onChange(of: mirrorCamera) { _, _ in
             recorder.cameraMirrorChanged()
         }
+    }
+
+    /// Teleprompter: floating script that only you can see (never recorded).
+    private var prompterRow: some View {
+        Button {
+            TeleprompterController.shared.toggle()
+        } label: {
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle()
+                        .fill(Theme.accent.opacity(0.15))
+                        .frame(width: 28, height: 28)
+                    Image(systemName: "text.viewfinder")
+                        .font(.caption)
+                        .foregroundStyle(Theme.accent)
+                }
+                Text("Teleprompter")
+                    .font(.callout.weight(.medium))
+                Spacer()
+                Text("invisible to viewers")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(PressableStyle())
     }
 
     /// Loom-style pill row. Pass nil binding for a fixed label row.

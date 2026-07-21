@@ -13,7 +13,8 @@ struct ChatEditorView: View {
     @State private var input = ""
     @State private var busy = false
 
-    private let suggestions = ["Cut the silences", "Keep it under a minute",
+    private let suggestions = ["Tighten it up", "Make a 60-sec highlight",
+                               "Cut the silences", "Keep it under a minute",
                                "Make it punchy", "Write me a title"]
 
     init(recorder: RecorderEngine) {

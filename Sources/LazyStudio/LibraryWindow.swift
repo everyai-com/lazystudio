@@ -691,6 +691,21 @@ struct LibraryView: View {
                             }
                         }
                         .font(.caption)
+                        HStack {
+                            if !editor.lastLinkedIn.isEmpty {
+                                Button("Copy LinkedIn post") {
+                                    NSPasteboard.general.clearContents()
+                                    NSPasteboard.general.setString(editor.lastLinkedIn, forType: .string)
+                                }
+                            }
+                            if !editor.lastTweet.isEmpty {
+                                Button("Copy tweet") {
+                                    NSPasteboard.general.clearContents()
+                                    NSPasteboard.general.setString(editor.lastTweet, forType: .string)
+                                }
+                            }
+                        }
+                        .font(.caption)
                     }
                     if let exportedURL {
                         Button {

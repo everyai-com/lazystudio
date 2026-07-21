@@ -45,11 +45,18 @@ final class AIEditor: ObservableObject {
         let plan = try await requestPlan(
             agent: agent, transcript: transcript, duration: duration,
             gaps: Self.gapReport(segments, duration: duration),
+            markers: Self.retakeMarkers(for: url),
             instruction: instruction
         )
+        adoptSocial(plan)
+        return plan
+    }
+
+    private func adoptSocial(_ plan: EditPlan) {
         lastTitle = plan.title
         lastDescription = plan.description
-        return plan
+        lastLinkedIn = plan.linkedin ?? ""
+        lastTweet = plan.tweet ?? ""
     }
 
     struct EditPlan: Decodable {
@@ -59,6 +66,20 @@ final class AIEditor: ObservableObject {
         let cuts: [Cut]?
         let title: String
         let description: String
+        // Social pack: post the same video everywhere without writing a word.
+        let linkedin: String?
+        let tweet: String?
+    }
+
+    @Published var lastLinkedIn = ""
+    @Published var lastTweet = ""
+
+    /// Retake markers the founder stamped with ⌘⇧X while recording.
+    static func retakeMarkers(for url: URL) -> [Double] {
+        guard let data = try? Data(contentsOf: RecorderEngine.markersURL(for: url)),
+              let times = try? JSONDecoder().decode([Double].self, from: data)
+        else { return [] }
+        return times
     }
 
     func polish(url: URL, agent: AgentCLI, instruction: String? = nil) async {
@@ -79,17 +100,25 @@ final class AIEditor: ObservableObject {
             let plan = try await requestPlan(
                 agent: agent, transcript: transcript, duration: duration,
                 gaps: Self.gapReport(segments, duration: duration),
+                markers: Self.retakeMarkers(for: url),
                 instruction: instruction
             )
 
             stage = "Snipping out the boring bits…"
             let output = try await applyCuts(source: url, plan: plan)
 
-            let notes = """
+            // Post-everywhere pack: title, description, LinkedIn, tweet.
+            var notes = """
             \(plan.title)
 
             \(plan.description)
             """
+            if let li = plan.linkedin, !li.isEmpty {
+                notes += "\n\n--- LinkedIn ---\n\(li)"
+            }
+            if let tw = plan.tweet, !tw.isEmpty {
+                notes += "\n\n--- X / Twitter ---\n\(tw)"
+            }
             let notesURL = output.deletingPathExtension().appendingPathExtension("txt")
             try notes.write(to: notesURL, atomically: true, encoding: .utf8)
 
@@ -101,8 +130,7 @@ final class AIEditor: ObservableObject {
 
             stage = "Done"
             lastPolishedURL = output
-            lastTitle = plan.title
-            lastDescription = plan.description
+            adoptSocial(plan)
         } catch {
             let msg = error.localizedDescription.lowercased().contains("speech")
                 ? (PolishError.noSpeech.errorDescription ?? "No speech found")
@@ -128,8 +156,14 @@ final class AIEditor: ObservableObject {
     }
 
     private func requestPlan(agent: AgentCLI, transcript: String, duration: Double,
-                             gaps: String = "none", instruction: String? = nil) async throws -> EditPlan {
+                             gaps: String = "none", markers: [Double] = [],
+                             instruction: String? = nil) async throws -> EditPlan {
         let extra = instruction.map { "\n\nThe creator also asks: \($0)\nFollow this while keeping the rules above." } ?? ""
+        let markerNote = markers.isEmpty ? "" : """
+
+
+        RETAKE MARKERS: while recording, the creator pressed the "bad take" key at these times: \(markers.map { String(format: "%.1fs", $0) }.joined(separator: ", ")). Each marker means the sentence or attempt IMMEDIATELY BEFORE it was a mistake — find and cut that flubbed passage (the creator usually repeats it right after). Treat these as strong signals, more reliable than your own guesses.
+        """
         let prompt = """
         You are a sharp, tasteful video editor. Below is a timestamped transcript of a \(Int(duration))-second screen recording destined for YouTube.
 
@@ -142,11 +176,14 @@ final class AIEditor: ObservableObject {
         4. Keep every sentence with real content; never cut mid-sentence; do not over-cut.
         5. Pad each kept range by 0.25s on both sides. Ranges must be within [0, \(duration)], non-overlapping, ascending.
 
-        Also write a catchy YouTube title and a 2-3 sentence description.
+        Also write, based on the actual content:
+        - a catchy YouTube title and a 2-3 sentence description
+        - "linkedin": a short founder-voice LinkedIn post (2-4 lines, no hashtag spam, ends with a soft hook)
+        - "tweet": one tweet under 280 chars, plain-spoken, no hashtags
 
         Reply with ONLY this JSON, no markdown fences, no commentary. For every gap you remove, add it to "cuts" with a 2-4 word reason (e.g. "silence", "false start", "retake of intro"):
-        {"keep": [{"start": 0.0, "end": 12.5}], "cuts": [{"start": 12.5, "end": 20.1, "reason": "silence"}], "title": "...", "description": "..."}
-
+        {"keep": [{"start": 0.0, "end": 12.5}], "cuts": [{"start": 12.5, "end": 20.1, "reason": "silence"}], "title": "...", "description": "...", "linkedin": "...", "tweet": "..."}
+        \(markerNote)
         Transcript:
         \(transcript)\(extra)
         """
