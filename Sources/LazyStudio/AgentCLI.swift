@@ -141,8 +141,9 @@ struct AgentCLI: Identifiable, Sendable {
             proc.environment = env
 
             let out = Pipe()
+            let err = Pipe()
             proc.standardOutput = out
-            proc.standardError = FileHandle.nullDevice
+            proc.standardError = err
 
             do { try proc.run() } catch {
                 continuation.resume(throwing: error)
@@ -152,8 +153,12 @@ struct AgentCLI: Identifiable, Sendable {
             DispatchQueue.global().asyncAfter(deadline: .now() + 300) {
                 if proc.isRunning { proc.terminate() }
             }
-            // Drain the pipe WHILE the process runs — reading only after exit
-            // deadlocks once the agent prints more than the 64KB pipe buffer.
+            // Drain both pipes WHILE the process runs — reading only after
+            // exit deadlocks once output exceeds the 64KB pipe buffer.
+            nonisolated(unsafe) var errData = Data()
+            DispatchQueue.global(qos: .utility).async {
+                errData = err.fileHandleForReading.readDataToEndOfFile()
+            }
             DispatchQueue.global(qos: .userInitiated).async {
                 let data = out.fileHandleForReading.readDataToEndOfFile()
                 proc.waitUntilExit()
@@ -161,7 +166,15 @@ struct AgentCLI: Identifiable, Sendable {
                 if proc.terminationStatus == 0 {
                     continuation.resume(returning: text)
                 } else {
-                    continuation.resume(throwing: AgentError.failed(text))
+                    var detail = text + "\n" + String(decoding: errData, as: UTF8.self)
+                    detail = detail.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if detail.lowercased().contains("keychain")
+                        || detail.lowercased().contains("credential")
+                        || detail.lowercased().contains("logged out")
+                        || detail.lowercased().contains("log in") {
+                        detail += "\n→ The agent can't unlock its login from inside the app. If macOS shows a keychain prompt, click Always Allow."
+                    }
+                    continuation.resume(throwing: AgentError.failed(detail))
                 }
             }
         }
@@ -171,7 +184,7 @@ struct AgentCLI: Identifiable, Sendable {
         case failed(String)
         var errorDescription: String? {
             if case .failed(let out) = self {
-                return "Agent CLI failed: \(out.prefix(200))"
+                return "Agent CLI failed: \(out.suffix(400))"
             }
             return nil
         }

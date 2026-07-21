@@ -64,16 +64,24 @@ struct ChatEditorView: View {
                     .font(.headline)
                     .foregroundStyle(.purple)
                 Spacer()
+                Button {
+                    messages = []
+                    if let url = pickedURL { pick(url) }
+                } label: { Image(systemName: "square.and.pencil") }
+                .buttonStyle(.borderless)
+                .help("New chat")
+                .disabled(busy)
                 Picker("", selection: Binding(
                     get: { pickedURL ?? model.items.first?.url },
                     set: { if let u = $0 { pick(u) } }
                 )) {
                     ForEach(model.items) { item in
-                        Text(item.name).tag(Optional(item.url))
+                        let d = model.durations[item.url].map { " · \(Int($0))s" } ?? ""
+                        Text(item.name + d).tag(Optional(item.url))
                     }
                 }
                 .labelsHidden()
-                .frame(maxWidth: 190)
+                .frame(maxWidth: 200)
             }
             .padding(12)
             Divider()

@@ -27,6 +27,12 @@ struct BatchEditView: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
 
+            Button(picked.count == rawItems.count ? "Select none" : "Select all") {
+                picked = picked.count == rawItems.count ? [] : Set(rawItems.map(\.url))
+            }
+            .font(.caption)
+            .disabled(running)
+
             List(rawItems) { item in
                 HStack(spacing: 10) {
                     Toggle("", isOn: Binding(

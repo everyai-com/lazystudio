@@ -600,6 +600,9 @@ struct LibraryView: View {
                                     let out = try await session.export(burnCaptions: burnCaptions)
                                     exportedURL = out
                                     model.refresh(dir: recorder.recordingsDirectory)
+                                    // Nudge when a long export finishes in the background.
+                                    NSSound(named: "Glass")?.play()
+                                    NSApp.requestUserAttention(.informationalRequest)
                                 } catch { errorText = error.localizedDescription }
                             }
                         } label: {
