@@ -80,6 +80,9 @@ struct LibraryView: View {
     @AppStorage("burnCaptions") private var burnCaptions = true
     @AppStorage("socialExport") private var socialExport = true
     @AppStorage("captionStyle") private var captionStyle = EditSession.CaptionStyle.boldPop.rawValue
+    @AppStorage("captionSize") private var captionSize = "M"
+    @State private var editingLineStart: Double?
+    @State private var editingText = ""
 
     private var styleBlurb: String {
         switch EditSession.CaptionStyle(rawValue: captionStyle) ?? .boldPop {
@@ -640,18 +643,44 @@ struct LibraryView: View {
                                 .font(.caption2.monospacedDigit())
                                 .foregroundStyle(.tertiary)
                                 .frame(width: 32, alignment: .trailing)
-                            Text(line.text)
-                                .font(.caption)
-                                .onTapGesture { session.seek(toSource: line.start) }
-                                .help("Click to jump here")
-                            Spacer(minLength: 4)
-                            Button {
-                                Task { await session.markCut(from: line.start, to: line.end) }
-                            } label: {
-                                Image(systemName: "scissors")
+                            if editingLineStart == line.start {
+                                TextField("Subtitle text", text: $editingText, axis: .vertical)
+                                    .font(.caption)
+                                    .textFieldStyle(.roundedBorder)
+                                    .onSubmit {
+                                        session.replaceTranscript(
+                                            from: line.start, to: line.end, with: editingText)
+                                        editingLineStart = nil
+                                    }
+                                Button {
+                                    session.replaceTranscript(
+                                        from: line.start, to: line.end, with: editingText)
+                                    editingLineStart = nil
+                                } label: { Image(systemName: "checkmark.circle.fill") }
+                                    .buttonStyle(.borderless)
+                                    .help("Save — subtitles use your words")
+                            } else {
+                                Text(line.text)
+                                    .font(.caption)
+                                    .onTapGesture { session.seek(toSource: line.start) }
+                                    .help("Click to jump here")
+                                Spacer(minLength: 4)
+                                Button {
+                                    editingText = line.text
+                                    editingLineStart = line.start
+                                } label: {
+                                    Image(systemName: "pencil")
+                                }
+                                .buttonStyle(.borderless)
+                                .help("Fix the words — subtitles and captions use your edit")
+                                Button {
+                                    Task { await session.markCut(from: line.start, to: line.end) }
+                                } label: {
+                                    Image(systemName: "scissors")
+                                }
+                                .buttonStyle(.borderless)
+                                .help("Cut this line from the video")
                             }
-                            .buttonStyle(.borderless)
-                            .help("Cut this line from the video")
                         }
                         .padding(.vertical, 2)
                     }
@@ -826,6 +855,17 @@ struct LibraryView: View {
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                             .fixedSize(horizontal: false, vertical: true)
+                        HStack(spacing: 8) {
+                            Text("Size").font(.caption2).foregroundStyle(.secondary)
+                            Picker("", selection: $captionSize) {
+                                Text("Small").tag("S")
+                                Text("Medium").tag("M")
+                                Text("Large").tag("L")
+                            }
+                            .pickerStyle(.segmented)
+                            .controlSize(.mini)
+                            .labelsHidden()
+                        }
                     }
                     Toggle(isOn: $socialExport) {
                         Label("Optimized for social (1080p)", systemImage: "sparkles.tv")
@@ -916,6 +956,8 @@ struct LibraryView: View {
 struct CaptionPreviewOverlay: View {
     @ObservedObject var session: EditSession
     @AppStorage("captionStyle") private var styleRaw = EditSession.CaptionStyle.boldPop.rawValue
+    // Read so the preview redraws instantly when the size chip changes.
+    @AppStorage("captionSize") private var sizeRaw = "M"
 
     var body: some View {
         let style = EditSession.CaptionStyle(rawValue: styleRaw) ?? .boldPop
@@ -944,8 +986,9 @@ struct CaptionPreviewOverlay: View {
             let piece = Text(w.text).foregroundColor(color)
             return acc == Text("") ? piece : acc + Text(" ") + piece
         }
+        let base: CGFloat = style == .hormozi ? 26 : style == .minimal ? 14 : 20
         return joined
-            .font(.system(size: style == .hormozi ? 26 : style == .minimal ? 14 : 20,
+            .font(.system(size: base * EditSession.CaptionStyle.sizeMultiplier,
                           weight: style.weight == .heavy ? .heavy : .semibold))
             .shadow(color: style.strokes ? .black : .clear, radius: 1, x: 1, y: 1)
             .shadow(color: style.strokes ? .black : .clear, radius: 1, x: -1, y: -1)

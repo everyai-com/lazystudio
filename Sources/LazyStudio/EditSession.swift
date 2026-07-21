@@ -400,6 +400,33 @@ final class EditSession: ObservableObject {
         static var current: CaptionStyle {
             CaptionStyle(rawValue: UserDefaults.standard.string(forKey: "captionStyle") ?? "") ?? .boldPop
         }
+
+        /// User size choice (S/M/L) — scales both export burn and live preview.
+        static var sizeMultiplier: CGFloat {
+            switch UserDefaults.standard.string(forKey: "captionSize") {
+            case "S": 0.75
+            case "L": 1.3
+            default: 1.0
+            }
+        }
+    }
+
+    /// Replace the spoken words between two source timestamps with new text —
+    /// the new words share the same time span, spaced evenly. This is how
+    /// "edit the subtitles" works without touching audio.
+    func replaceTranscript(from start: Double, to end: Double, with text: String) {
+        let newWords = text.split(separator: " ").map(String.init).filter { !$0.isEmpty }
+        var kept = transcript.filter { $0.end <= start || $0.start >= end }
+        guard !newWords.isEmpty else { transcript = kept; return }
+        let span = max(end - start, 0.3)
+        let per = span / Double(newWords.count)
+        let inserted = newWords.enumerated().map { i, w in
+            TranscriptSegment(start: start + per * Double(i),
+                              end: start + per * Double(i + 1),
+                              text: w)
+        }
+        kept.append(contentsOf: inserted)
+        transcript = kept.sorted { $0.start < $1.start }
     }
 
     /// Map a source timestamp into the edited timeline (nil if cut).
@@ -483,7 +510,7 @@ final class EditSession: ObservableObject {
         parent.addSublayer(videoLayer)
 
         let style = CaptionStyle.current
-        let fontSize = max(24, size.height * style.sizeFactor)
+        let fontSize = max(18, size.height * style.sizeFactor * CaptionStyle.sizeMultiplier)
         let font = NSFont.systemFont(ofSize: fontSize, weight: style.weight)
         var attrs: [NSAttributedString.Key: Any] = [
             .font: font,
