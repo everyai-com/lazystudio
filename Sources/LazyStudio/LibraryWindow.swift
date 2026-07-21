@@ -73,7 +73,6 @@ struct LibraryView: View {
     @ObservedObject var editor: AIEditor
     @StateObject private var model = LibraryModel()
     @State private var session: EditSession?
-    @State private var instruction = ""
     @State private var confirmDelete: VideoItem?
     @State private var errorText = ""
     @State private var exportedURL: URL?
@@ -118,6 +117,12 @@ struct LibraryView: View {
                 session = adopted
                 Self.activeSession = adopted
                 adoptedSession = nil
+                return
+            }
+            // The chat editor may already hold this video's timeline —
+            // reuse it so AI edits made there are visible here.
+            if let live = Self.activeSession, live.url == item.url {
+                session = live
                 return
             }
             let s = EditSession(url: item.url)
@@ -595,34 +600,38 @@ struct LibraryView: View {
 
                 Divider()
 
-                TextField("Tell the AI what you want…", text: $instruction, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
-                    .lineLimit(2...4)
-                Text("e.g. \"cut the first minute\", \"keep it under 2 minutes\", \"make the title funny\"")
+                // One AI editing home: the chat. This jumps there with this
+                // exact video and timeline — no second, worse edit box here.
+                Button {
+                    NotificationCenter.default.post(name: .lsOpenChat, object: item.url)
+                } label: {
+                    Label("Edit with AI", systemImage: "scissors")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Theme.accent)
+                .disabled(session == nil)
+                Text("Opens the AI editor — chat your changes, watch them land live.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
 
+                // One-click tighten for the impatient — no chat needed.
                 Button {
                     guard let agent = recorder.activeAgent, let session else { return }
-                    let extra = instruction.isEmpty ? nil : instruction
                     errorText = ""
                     Task {
                         do {
-                            let plan = try await editor.makePlan(
-                                url: item.url, agent: agent, instruction: extra
-                            )
+                            let plan = try await editor.makePlan(url: item.url, agent: agent)
                             await session.apply(keep: plan.keep, cuts: plan.cuts)
                         } catch {
                             errorText = error.localizedDescription
                         }
                     }
                 } label: {
-                    Label("Edit with AI", systemImage: "wand.and.stars")
+                    Label("Quick tighten", systemImage: "bolt")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(Theme.accent)
-                .disabled(editor.isPolishing || session == nil)
+                .disabled(editor.isPolishing || session == nil || recorder.activeAgent == nil)
 
                 if editor.isPolishing {
                     HStack(spacing: 8) {

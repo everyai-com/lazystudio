@@ -41,12 +41,23 @@ struct ChatEditorView: View {
                 if let target = remembered ?? model.items.first { pick(target.url) }
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .lsOpenChat)) { note in
+            // "Edit with AI" from My Videos lands here with that video.
+            model.refresh(dir: recorder.recordingsDirectory)
+            if let url = note.object as? URL { pick(url) }
+        }
     }
 
     private func pick(_ url: URL) {
         pickedURL = url
         store.rememberVideo(url)
         session?.player.pause()
+        // Reuse the session My Videos was editing — cuts carry over instead
+        // of silently resetting the timeline.
+        if let existing = LibraryView.activeSession, existing.url == url {
+            session = existing
+            return
+        }
         let s = EditSession(url: url)
         session = s
         LibraryView.activeSession = s   // MCP tools edit THIS session

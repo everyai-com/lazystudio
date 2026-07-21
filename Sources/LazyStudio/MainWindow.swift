@@ -49,6 +49,8 @@ enum MainWindow {
 extension Notification.Name {
     static let lsShowVideos = Notification.Name("lazystudio.showVideos")
     static let lsAdoptSession = Notification.Name("lazystudio.adoptSession")
+    /// Jump to the AI Edit chat with a specific video (object = URL).
+    static let lsOpenChat = Notification.Name("lazystudio.openChat")
 }
 
 /// Closing the panel turns off the camera preview (unless recording) —
@@ -141,6 +143,9 @@ private struct AppShellView: View {
             .listStyle(.sidebar)
             .onReceive(NotificationCenter.default.publisher(for: .lsShowVideos)) { _ in
                 pane = .videos
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .lsOpenChat)) { _ in
+                pane = .edit
             }
         } detail: {
             let _ = pane
