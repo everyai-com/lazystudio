@@ -84,6 +84,13 @@ struct LibraryView: View {
     @State private var editingLineStart: Double?
     @State private var editingText = ""
 
+    /// Strip filesystem-hostile characters from an AI title.
+    static func fileSafe(_ s: String) -> String {
+        s.components(separatedBy: CharacterSet(charactersIn: "/\\:?%*|\"<>"))
+            .joined()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     private var styleBlurb: String {
         switch EditSession.CaptionStyle(rawValue: captionStyle) ?? .boldPop {
         case .boldPop: "Dark rounded box, words pop in as spoken — the TikTok classic."
@@ -635,6 +642,9 @@ struct LibraryView: View {
             } else {
                 Label("Transcript", systemImage: "text.quote")
                     .font(.subheadline.bold())
+                Text("Click a line to jump · ✏️ fix the words (subtitles follow) · ✂️ cut it")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
                 VStack(alignment: .leading, spacing: 2) {
                     ForEach(transcriptLines(session), id: \.start) { line in
                         HStack(alignment: .top, spacing: 6) {
@@ -879,8 +889,32 @@ struct LibraryView: View {
                     HStack {
                         Button {
                             Task {
+                                // Name the file from what was SAID, not
+                                // "Recording …": AI title if we have one,
+                                // else Apple's on-device model writes one.
+                                var name = Self.fileSafe(editor.lastTitle)
+                                if name.isEmpty, !session.transcript.isEmpty {
+                                    let talk = session.transcript.map(\.text).joined(separator: " ")
+                                    if let pack = await OnDeviceWriter.socialPack(transcript: talk) {
+                                        name = Self.fileSafe(pack.title)
+                                        if !name.isEmpty { editor.lastTitle = pack.title }
+                                    }
+                                }
+                                if name.isEmpty {
+                                    name = item.url.deletingPathExtension().lastPathComponent + " (edited)"
+                                }
+                                let panel = NSSavePanel()
+                                panel.title = "Export video"
+                                panel.nameFieldStringValue = name + ".mp4"
+                                panel.directoryURL = recorder.recordingsDirectory
+                                panel.canCreateDirectories = true
+                                guard panel.runModal() == .OK, var dest = panel.url else { return }
+                                if dest.pathExtension.lowercased() != "mp4" {
+                                    dest.appendPathExtension("mp4")
+                                }
                                 do {
-                                    let out = try await session.export(burnCaptions: burnCaptions, social: socialExport)
+                                    let out = try await session.export(
+                                        burnCaptions: burnCaptions, social: socialExport, to: dest)
                                     exportedURL = out
                                     model.refresh(dir: recorder.recordingsDirectory)
                                     // Nudge when a long export finishes in the background.
@@ -911,7 +945,8 @@ struct LibraryView: View {
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundStyle(.green)
                             VStack(alignment: .leading, spacing: 4) {
-                                Text("Saved to Movies ▸ LazyStudio").font(.caption.bold())
+                                Text("Saved to \(exportedURL.deletingLastPathComponent().lastPathComponent)")
+                                    .font(.caption.bold())
                                 Text(exportedURL.lastPathComponent)
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)

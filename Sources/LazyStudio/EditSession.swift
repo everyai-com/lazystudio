@@ -327,11 +327,12 @@ final class EditSession: ObservableObject {
 
     /// Render exactly what the strip shows → "(edited).mp4" next to the raw
     /// file. Always writes an .srt; optionally burns styled subtitles in.
-    func export(burnCaptions: Bool = false, social: Bool = false) async throws -> URL {
+    func export(burnCaptions: Bool = false, social: Bool = false,
+                to destination: URL? = nil) async throws -> URL {
         isExporting = true
         defer { isExporting = false }
         let comp = try await Self.composition(asset: AVURLAsset(url: url), keep: keptRanges)
-        let output = url.deletingPathExtension().appendingPathExtension("edited.mp4")
+        let output = destination ?? url.deletingPathExtension().appendingPathExtension("edited.mp4")
         try? FileManager.default.removeItem(at: output)
         // Social: 1080p H.264 — retina captures are 4–5K wide and platforms
         // just re-compress them badly; a clean 1080p upload looks sharper on
