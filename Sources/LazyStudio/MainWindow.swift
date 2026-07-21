@@ -23,6 +23,8 @@ enum MainWindow {
         w.title = "LazyStudio"
         w.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
         w.titlebarAppearsTransparent = true
+        // The studio is always dark — it's a look, not a preference.
+        w.appearance = NSAppearance(named: .darkAqua)
         w.setContentSize(NSSize(width: 900, height: 600))
         w.minSize = NSSize(width: 760, height: 500)
         w.isReleasedWhenClosed = false
@@ -78,6 +80,7 @@ private struct AIEditPane: View {
                 BatchEditView(recorder: recorder)
             }
         }
+        .studioStage()
     }
 }
 
@@ -167,13 +170,6 @@ private struct MainView: View {
 
     var body: some View {
         ZStack {
-            // Ambient brand glow behind the card.
-            RadialGradient(
-                colors: [Theme.purple.opacity(0.18), .clear],
-                center: .center, startRadius: 20, endRadius: 420
-            )
-            .ignoresSafeArea()
-
             VStack(spacing: 12) {
                 VStack(spacing: 4) {
                     ZStack {
@@ -241,6 +237,7 @@ private struct MainView: View {
                 .padding(12)
             }
         }
+        .studioStage()
         .onChange(of: recorder.showCamera) { _, _ in
             recorder.updateBubblePreview()
         }

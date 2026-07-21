@@ -188,6 +188,7 @@ struct LibraryView: View {
             }
             .padding(18)
         }
+        .studioStage()
     }
 
     private func videoCard(_ item: VideoItem) -> some View {
@@ -262,15 +263,15 @@ struct LibraryView: View {
                     .padding(10)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .background(.background.opacity(0.6))
+                .background(.white.opacity(0.05))
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .overlay(
                     RoundedRectangle(cornerRadius: 12)
-                        .strokeBorder(hovering ? Theme.purple.opacity(0.5) : .primary.opacity(0.07),
+                        .strokeBorder(hovering ? Theme.purple.opacity(0.6) : .white.opacity(0.09),
                                       lineWidth: hovering ? 1.5 : 1)
                 )
-                .shadow(color: .black.opacity(hovering ? 0.18 : 0.07),
-                        radius: hovering ? 12 : 6, y: hovering ? 6 : 3)
+                .shadow(color: hovering ? Theme.purple.opacity(0.25) : .black.opacity(0.3),
+                        radius: hovering ? 14 : 8, y: 4)
                 .scaleEffect(hovering ? 1.015 : 1)
                 // Hover fires constantly — keep it fast, no bounce.
                 .animation(.lsSnappy(0.15), value: hovering)
@@ -337,9 +338,10 @@ struct LibraryView: View {
                     .padding(12)
                 }
                 .frame(width: 290)
-                .background(.purple.opacity(0.04))
+                .background(.white.opacity(0.03))
             }
         }
+        .studioStage()
     }
 
     /// "What the AI removed" — every cut with its reason, restorable.
@@ -369,7 +371,7 @@ struct LibraryView: View {
             }
         }
         .padding(12)
-        .background(.background, in: RoundedRectangle(cornerRadius: 12))
+        .lsCard(radius: 12)
     }
 
     // MARK: - Segment strip (filmstrip + overlays + trim handles)
@@ -518,7 +520,7 @@ struct LibraryView: View {
             }
         }
         .padding(12)
-        .background(.background, in: RoundedRectangle(cornerRadius: 12))
+        .lsCard(radius: 12)
     }
 
     private func transcriptLines(_ session: EditSession) -> [(start: Double, end: Double, text: String)] {
@@ -704,6 +706,6 @@ struct LibraryView: View {
             }
         }
         .padding(12)
-        .background(.background, in: RoundedRectangle(cornerRadius: 12))
+        .lsCard(radius: 12)
     }
 }

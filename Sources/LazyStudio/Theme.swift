@@ -18,6 +18,38 @@ enum Theme {
     }
 }
 
+extension Theme {
+    /// The "dark studio" stage: charcoal-indigo with a soft key light from
+    /// the top. Content (thumbnails, player) becomes the brightest thing on
+    /// screen — the eye goes to the video, not the chrome.
+    struct Studio: View {
+        var body: some View {
+            ZStack {
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.085, green: 0.075, blue: 0.125),
+                        Color(red: 0.045, green: 0.04, blue: 0.07),
+                    ],
+                    startPoint: .top, endPoint: .bottom
+                )
+                RadialGradient(
+                    colors: [Theme.purple.opacity(0.13), .clear],
+                    center: UnitPoint(x: 0.5, y: -0.1),
+                    startRadius: 0, endRadius: 520
+                )
+            }
+            .ignoresSafeArea()
+        }
+    }
+}
+
+extension View {
+    /// Put this screen on the dark studio stage.
+    func studioStage() -> some View {
+        ZStack { Theme.Studio(); self }
+    }
+}
+
 extension Animation {
     /// Strong ease-out (cubic-bezier 0.23,1,0.32,1) — built-in curves are too
     /// weak; UI motion stays under 300ms and never eases in.
@@ -40,12 +72,19 @@ struct CardBackground: ViewModifier {
     var radius: CGFloat = 14
     func body(content: Content) -> some View {
         content
-            .background(.background.opacity(0.6), in: RoundedRectangle(cornerRadius: radius))
+            // Glass over the dark stage: faint fill + hairline top-light border.
+            .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: radius))
             .overlay(
                 RoundedRectangle(cornerRadius: radius)
-                    .strokeBorder(.primary.opacity(0.06))
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [.white.opacity(0.16), .white.opacity(0.04)],
+                            startPoint: .top, endPoint: .bottom
+                        ),
+                        lineWidth: 1
+                    )
             )
-            .shadow(color: .black.opacity(0.06), radius: 8, y: 3)
+            .shadow(color: .black.opacity(0.35), radius: 16, y: 6)
     }
 }
 
