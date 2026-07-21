@@ -78,6 +78,7 @@ struct LibraryView: View {
     @State private var errorText = ""
     @State private var exportedURL: URL?
     @State private var adoptedSession: EditSession?
+    @AppStorage("burnCaptions") private var burnCaptions = true
 
     init(recorder: RecorderEngine) {
         self.recorder = recorder
@@ -583,11 +584,20 @@ struct LibraryView: View {
                 }
 
                 if let session, session.hasCuts {
+                    Toggle(isOn: $burnCaptions) {
+                        Label("Stylish subtitles in the video", systemImage: "captions.bubble")
+                            .font(.caption)
+                    }
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    Text("Bold, punchy captions burned in — plus a .srt file for YouTube either way.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
                     HStack {
                         Button {
                             Task {
                                 do {
-                                    let out = try await session.export()
+                                    let out = try await session.export(burnCaptions: burnCaptions)
                                     exportedURL = out
                                     model.refresh(dir: recorder.recordingsDirectory)
                                 } catch { errorText = error.localizedDescription }

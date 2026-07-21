@@ -66,11 +66,13 @@ private struct AppShellView: View {
     enum Pane: String, CaseIterable, Identifiable {
         case record = "Record"
         case videos = "My Videos"
+        case edit = "AI Edit"
         var id: String { rawValue }
         var icon: String {
             switch self {
             case .record: "record.circle.fill"
             case .videos: "film.stack.fill"
+            case .edit: "wand.and.stars"
             }
         }
     }
@@ -100,6 +102,8 @@ private struct AppShellView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             case .videos:
                 LibraryView(recorder: recorder)
+            case .edit:
+                BatchEditView(recorder: recorder)
             }
         }
     }

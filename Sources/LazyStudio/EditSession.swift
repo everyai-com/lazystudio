@@ -40,6 +40,8 @@ final class EditSession: ObservableObject {
         segments = [Segment(start: 0, end: max(duration, 0.1), kept: true)]
         player.replaceCurrentItem(with: AVPlayerItem(asset: asset))
         loadFilmstrip()
+        // Auto-transcript: subtitles are just there, no button hunting.
+        Task { await loadTranscript() }
     }
 
     /// A row of thumbnails across the whole video, drawn under the strip.
@@ -171,8 +173,9 @@ final class EditSession: ObservableObject {
         return composition
     }
 
-    /// Render exactly what the strip shows → "(edited).mp4" next to the raw file.
-    func export() async throws -> URL {
+    /// Render exactly what the strip shows → "(edited).mp4" next to the raw
+    /// file. Always writes an .srt; optionally burns styled subtitles in.
+    func export(burnCaptions: Bool = false) async throws -> URL {
         isExporting = true
         defer { isExporting = false }
         let comp = try await Self.composition(asset: AVURLAsset(url: url), keep: keptRanges)
@@ -181,7 +184,105 @@ final class EditSession: ObservableObject {
         guard let exporter = AVAssetExportSession(
             asset: comp, presetName: AVAssetExportPresetHighestQuality
         ) else { throw AIEditor.PolishError.exportFailed }
+
+        if burnCaptions, !transcript.isEmpty {
+            exporter.videoComposition = try await captionComposition(for: comp)
+        }
         try await exporter.export(to: output, as: .mp4)
+
+        // Sidecar captions for YouTube either way.
+        if !transcript.isEmpty {
+            let srt = AIEditor.srt(segments: transcript, keep: keptRanges)
+            try? srt.write(to: output.deletingPathExtension().appendingPathExtension("srt"),
+                           atomically: true, encoding: .utf8)
+        }
         return output
+    }
+
+    // MARK: - Tasteful burned-in subtitles
+
+    /// Map a source timestamp into the edited timeline (nil if cut).
+    private func remap(_ t: Double) -> Double? {
+        var offset = 0.0
+        for r in keptRanges {
+            if t >= r.start && t <= r.end { return offset + (t - r.start) }
+            if t > r.end { offset += r.end - r.start }
+        }
+        return nil
+    }
+
+    /// Short 3–4 word blocks, like good social captions — not paragraphs.
+    private func captionBlocks() -> [(start: Double, end: Double, text: String)] {
+        var blocks: [(Double, Double, String)] = []
+        var words: [String] = []
+        var s: Double?
+        var e = 0.0
+        for seg in transcript {
+            guard let rs = remap(seg.start), let re = remap(seg.end) else { continue }
+            if s == nil { s = rs }
+            words.append(seg.text)
+            e = re
+            if words.count >= 4 || e - (s ?? e) >= 1.8 {
+                blocks.append((s!, max(e, s! + 0.6), words.joined(separator: " ")))
+                words = []; s = nil
+            }
+        }
+        if let s, !words.isEmpty { blocks.append((s, max(e, s + 0.6), words.joined(separator: " "))) }
+        return blocks.map { (start: $0.0, end: $0.1, text: $0.2.uppercased()) }
+    }
+
+    private func captionComposition(for comp: AVMutableComposition) async throws -> AVMutableVideoComposition {
+        let videoComp = try await AVMutableVideoComposition.videoComposition(withPropertiesOf: comp)
+        let size = videoComp.renderSize
+        let parent = CALayer()
+        parent.frame = CGRect(origin: .zero, size: size)
+        let videoLayer = CALayer()
+        videoLayer.frame = parent.frame
+        parent.addSublayer(videoLayer)
+
+        let fontSize = max(28, size.height * 0.045)
+        for block in captionBlocks() {
+            let text = CATextLayer()
+            text.string = NSAttributedString(string: block.text, attributes: [
+                .font: NSFont.systemFont(ofSize: fontSize, weight: .heavy),
+                .foregroundColor: NSColor.white,
+                .strokeColor: NSColor.black,
+                .strokeWidth: -3.0,
+            ])
+            text.alignmentMode = .center
+            text.contentsScale = 2
+            text.isWrapped = true
+            let w = min(size.width * 0.86,
+                        CGFloat(block.text.count) * fontSize * 0.62 + 48)
+            let h = fontSize * 1.7
+            text.cornerRadius = h / 4
+            text.backgroundColor = NSColor.black.withAlphaComponent(0.55).cgColor
+            text.frame = CGRect(x: (size.width - w) / 2, y: size.height * 0.07,
+                                width: w, height: h)
+            text.opacity = 0
+
+            let appear = CABasicAnimation(keyPath: "opacity")
+            appear.fromValue = 0
+            appear.toValue = 1
+            appear.duration = 0.12
+            appear.beginTime = AVCoreAnimationBeginTimeAtZero + block.start
+            appear.fillMode = .forwards
+            appear.isRemovedOnCompletion = false
+            let vanish = CABasicAnimation(keyPath: "opacity")
+            vanish.fromValue = 1
+            vanish.toValue = 0
+            vanish.duration = 0.1
+            vanish.beginTime = AVCoreAnimationBeginTimeAtZero + block.end
+            vanish.fillMode = .forwards
+            vanish.isRemovedOnCompletion = false
+            text.add(appear, forKey: "in")
+            text.add(vanish, forKey: "out")
+            parent.addSublayer(text)
+        }
+
+        videoComp.animationTool = AVVideoCompositionCoreAnimationTool(
+            postProcessingAsVideoLayer: videoLayer, in: parent
+        )
+        return videoComp
     }
 }

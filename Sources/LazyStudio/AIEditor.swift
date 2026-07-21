@@ -42,6 +42,7 @@ final class AIEditor: ObservableObject {
         stage = "Thinking about the best parts…"
         let plan = try await requestPlan(
             agent: agent, transcript: transcript, duration: duration,
+            gaps: Self.gapReport(segments, duration: duration),
             instruction: instruction
         )
         lastTitle = plan.title
@@ -74,6 +75,7 @@ final class AIEditor: ObservableObject {
             stage = "Thinking about the best parts…"
             let plan = try await requestPlan(
                 agent: agent, transcript: transcript, duration: duration,
+                gaps: Self.gapReport(segments, duration: duration),
                 instruction: instruction
             )
 
@@ -106,12 +108,35 @@ final class AIEditor: ObservableObject {
         }
     }
 
-    private func requestPlan(agent: AgentCLI, transcript: String, duration: Double, instruction: String? = nil) async throws -> EditPlan {
+    /// List the speech-free gaps so the model doesn't have to infer them —
+    /// this is what turns "one big cut" into many precise ones.
+    static func gapReport(_ segs: [TranscriptSegment], duration: Double) -> String {
+        var gaps: [(Double, Double)] = []
+        var prev = 0.0
+        for s in segs {
+            if s.start - prev > 0.7 { gaps.append((prev, s.start)) }
+            prev = max(prev, s.end)
+        }
+        if duration - prev > 0.7 { gaps.append((prev, duration)) }
+        guard !gaps.isEmpty else { return "none" }
+        return gaps.map { String(format: "%.1f–%.1f (%.1fs)", $0.0, $0.1, $0.1 - $0.0) }
+            .joined(separator: ", ")
+    }
+
+    private func requestPlan(agent: AgentCLI, transcript: String, duration: Double,
+                             gaps: String = "none", instruction: String? = nil) async throws -> EditPlan {
         let extra = instruction.map { "\n\nThe creator also asks: \($0)\nFollow this while keeping the rules above." } ?? ""
         let prompt = """
-        You are a video editor. Below is a timestamped transcript of a \(Int(duration))-second screen recording destined for YouTube.
+        You are a sharp, tasteful video editor. Below is a timestamped transcript of a \(Int(duration))-second screen recording destined for YouTube.
 
-        Decide which time ranges to KEEP: drop long silences (gaps between lines), false starts, filler, and obvious retakes (repeated sentences — keep the last take). Keep everything with real content; do not over-cut. Pad each kept range by 0.3s on both sides. Ranges must be within [0, \(duration)], non-overlapping, ascending.
+        Detected silence gaps (no speech at all): \(gaps)
+
+        Rules:
+        1. CUT every silence gap longer than 1.2s — leave only ~0.25s of breathing room on each side.
+        2. CUT false starts, filler ("um", "so like" openings that restart), and retakes (repeated sentences — keep the LAST take).
+        3. Prefer MANY precise cuts over one big cut. A good edit of a talking video typically has 4–12 separate cuts.
+        4. Keep every sentence with real content; never cut mid-sentence; do not over-cut.
+        5. Pad each kept range by 0.25s on both sides. Ranges must be within [0, \(duration)], non-overlapping, ascending.
 
         Also write a catchy YouTube title and a 2-3 sentence description.
 
