@@ -61,10 +61,13 @@ struct AgentCLI: Identifiable, Sendable {
 
     /// Run a one-shot prompt through this agent and return its text output.
     func run(prompt: String) async throws -> String {
+        // Always use the cheapest model — an edit plan is an easy task,
+        // and this keeps the user's subscription usage near zero.
         let args: [String]
         switch id {
-        case "claude": args = ["-p", prompt]
-        case "codex":  args = ["exec", "--skip-git-repo-check", prompt]
+        case "claude": args = ["-p", "--model", "haiku", prompt]
+        case "codex":  args = ["exec", "--skip-git-repo-check", "-m", "gpt-5-mini", prompt]
+        case "gemini": args = ["-p", prompt, "-m", "gemini-2.5-flash"]
         default:       args = ["-p", prompt]
         }
 
@@ -81,17 +84,21 @@ struct AgentCLI: Identifiable, Sendable {
             proc.standardOutput = out
             proc.standardError = FileHandle.nullDevice
 
-            proc.terminationHandler = { p in
+            do { try proc.run() } catch {
+                continuation.resume(throwing: error)
+                return
+            }
+            // Drain the pipe WHILE the process runs — reading only after exit
+            // deadlocks once the agent prints more than the 64KB pipe buffer.
+            DispatchQueue.global(qos: .userInitiated).async {
                 let data = out.fileHandleForReading.readDataToEndOfFile()
+                proc.waitUntilExit()
                 let text = String(decoding: data, as: UTF8.self)
-                if p.terminationStatus == 0 {
+                if proc.terminationStatus == 0 {
                     continuation.resume(returning: text)
                 } else {
                     continuation.resume(throwing: AgentError.failed(text))
                 }
-            }
-            do { try proc.run() } catch {
-                continuation.resume(throwing: error)
             }
         }
     }

@@ -7,6 +7,8 @@ import Speech
 @MainActor
 enum WelcomeWindow {
     private static var window: NSWindow?
+    /// Set by RecorderEngine so "Start recording" actually records.
+    static var onRecord: (() -> Void)?
 
     static var allPermissionsGranted: Bool {
         CGPreflightScreenCaptureAccess()
@@ -87,9 +89,28 @@ private struct WelcomeView: View {
                 .font(.caption)
                 .foregroundStyle(.tertiary)
 
-            Button("Let's go") { WelcomeWindow.close() }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
+            // "Let's go" used to just close the window — in a menu-bar-only
+            // app that looks like nothing happened. Now it starts recording.
+            Button {
+                WelcomeWindow.close()
+                WelcomeWindow.onRecord?()
+            } label: {
+                Label("Start recording", systemImage: "record.circle.fill")
+                    .font(.title3.bold())
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.red)
+            .controlSize(.large)
+
+            Button("Not yet — take me to the app") {
+                WelcomeWindow.close()
+                MainWindow.show()
+            }
+            .buttonStyle(.plain)
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
         .padding(28)
         .frame(width: 420)

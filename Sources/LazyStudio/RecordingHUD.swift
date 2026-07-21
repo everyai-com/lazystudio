@@ -24,6 +24,8 @@ final class RecordingHUDController {
             backing: .buffered, defer: false
         )
         panel.contentViewController = hosting
+        // Never bake the REC pill into the recording itself.
+        panel.sharingType = .none
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.level = .statusBar
@@ -40,13 +42,16 @@ final class RecordingHUDController {
         panel.orderFrontRegardless()
         window = panel
 
-        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
                 let s = Int(Date().timeIntervalSince(self.startedAt))
                 self.model.elapsed = String(format: "%02d:%02d", s / 60, s % 60)
             }
         }
+        // .common so the counter keeps ticking while menus/drags are open.
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
     }
 
     func hide() {

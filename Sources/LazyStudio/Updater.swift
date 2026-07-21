@@ -73,7 +73,12 @@ final class Updater: ObservableObject {
             try run("/usr/bin/ditto", newApp.path, dest)
 
             status = "Relaunching…"
-            try run("/usr/bin/open", "-n", dest)
+            // Relaunch AFTER this instance is gone — launching first trips
+            // the new copy's single-instance guard and both quit.
+            let relaunch = Process()
+            relaunch.executableURL = URL(fileURLWithPath: "/bin/sh")
+            relaunch.arguments = ["-c", "sleep 2; /usr/bin/open '\(dest)'"]
+            try relaunch.run()
             NSApp.terminate(nil)
         } catch {
             status = "Update failed: \(error.localizedDescription)"

@@ -23,8 +23,31 @@ final class RecorderEngine: NSObject, ObservableObject {
     let aiEditor = AIEditor()
     let updater = Updater()
 
+    /// Which detected agent does the editing ("claude" / "codex" / "gemini").
+    @Published var selectedAgentID = UserDefaults.standard.string(forKey: "selectedAgent") ?? "" {
+        didSet { UserDefaults.standard.set(selectedAgentID, forKey: "selectedAgent") }
+    }
+    var activeAgent: AgentCLI? {
+        agents.first { $0.id == selectedAgentID } ?? agents.first
+    }
+
+    /// Open Terminal with the agent's login command (Codex = ChatGPT account,
+    /// Claude Code = Claude account) — no API keys anywhere.
+    static func openLogin(for agentID: String) {
+        let cmd = switch agentID {
+        case "codex": "codex login"
+        case "gemini": "gemini"
+        default: "claude /login"
+        }
+        let script = "tell application \"Terminal\"\nactivate\ndo script \"\(cmd)\"\nend tell"
+        var error: NSDictionary?
+        NSAppleScript(source: script)?.executeAndReturnError(&error)
+    }
+
     private var stream: SCStream?
     private var recordingOutput: SCRecordingOutput?
+    private var fileFinalized = false
+    private var finalizeContinuation: CheckedContinuation<Void, Never>?
     private let cameraOverlay = CameraOverlayController()
     private let effectsOverlay = EffectsOverlayController()
     private let recordingHUD = RecordingHUDController()
@@ -37,6 +60,13 @@ final class RecorderEngine: NSObject, ObservableObject {
             .merge(with: updater.objectWillChange)
             .sink { [weak self] _ in self?.objectWillChange.send() }
         updater.checkAutomatically()
+        // Bubble problems (camera denied, no camera) show in the menu instead
+        // of the bubble just silently not appearing.
+        cameraOverlay.onProblem = { [weak self] msg in self?.statusMessage = msg }
+        WelcomeWindow.onRecord = { [weak self] in
+            Task { @MainActor in await self?.start() }
+        }
+        MainWindow.recorder = self
         // Agent detection shells out (`command -v`), so keep it off the main thread.
         Task { [weak self] in
             let found = await Task.detached { AgentCLI.detectAll() }.value
@@ -51,8 +81,26 @@ final class RecorderEngine: NSObject, ObservableObject {
         return dir
     }
 
-    func start() async {
+    private var isStarting = false
+
+    /// Show/hide the live camera bubble outside of recording so you can
+    /// position yourself before pressing Record (Loom-style).
+    func updateBubblePreview() {
+        if showCamera { cameraOverlay.show() }
+        else if !isRecording { cameraOverlay.hide() }
+    }
+
+    /// Turn the preview bubble (and camera) off, e.g. when the panel closes.
+    func hideBubblePreview() {
         guard !isRecording else { return }
+        cameraOverlay.hide()
+    }
+
+    func start() async {
+        // isStarting also blocks the double-press that used to wedge things.
+        guard !isRecording, !isStarting else { return }
+        isStarting = true
+        defer { isStarting = false }
 
         // Fail loudly and helpfully if Screen Recording isn't granted —
         // a silent status line is how recordings get lost.
@@ -63,20 +111,36 @@ final class RecorderEngine: NSObject, ObservableObject {
             return
         }
 
-        // Show the native "choose what to share" picker (same one as
-        // Zoom/Meet) so clicking Record always visibly does something.
-        statusMessage = "Choose what to record…"
-        let picker = SCContentSharingPicker.shared
-        picker.add(self)
-        picker.isActive = true
-        picker.present()
-    }
+        // Ask for mic access up front so recordings aren't silently voiceless.
+        if includeMicrophone, AVCaptureDevice.authorizationStatus(for: .audio) != .authorized {
+            let granted = await AVCaptureDevice.requestAccess(for: .audio)
+            if !granted {
+                statusMessage = "Mic denied — recording without voice"
+            }
+        }
 
-    /// Called once the user picks a screen/window/app in the system picker.
-    func beginRecording(filter: SCContentFilter) async {
-        guard !isRecording else { return }
+        // Same for the camera, so the bubble reliably appears on first use.
+        if showCamera, AVCaptureDevice.authorizationStatus(for: .video) == .notDetermined {
+            _ = await AVCaptureDevice.requestAccess(for: .video)
+        }
+
+        // Loom-style: no confusing picker — just record the whole main screen.
         statusMessage = "Starting…"
         do {
+            let content = try await SCShareableContent.excludingDesktopWindows(
+                false, onScreenWindowsOnly: true
+            )
+            guard let display = content.displays.first else {
+                statusMessage = "No screen found"
+                return
+            }
+            let filter = SCContentFilter(display: display, excludingWindows: [])
+            MainWindow.hide()
+            ResultWindow.close()
+            fileFinalized = false
+
+            // Build the whole pipeline BEFORE the countdown so capture
+            // starts the instant it hits zero — no lag after "1".
             let config = SCStreamConfiguration()
             let scale = CGFloat(filter.pointPixelScale)
             config.width = Int(filter.contentRect.width * scale)
@@ -104,6 +168,11 @@ final class RecorderEngine: NSObject, ObservableObject {
             let output = SCRecordingOutput(configuration: recordingConfig, delegate: self)
             try stream.addRecordingOutput(output)
 
+            // Camera bubble up during the countdown so you can position
+            // yourself; 3…2…1, then capture fires immediately.
+            if showCamera { cameraOverlay.show() }
+            await CountdownOverlay.run()
+
             try await stream.startCapture()
 
             self.stream = stream
@@ -112,73 +181,98 @@ final class RecorderEngine: NSObject, ObservableObject {
             self.isRecording = true
             self.statusMessage = "Recording…"
 
-            if showCamera { cameraOverlay.show() }
             if clickEffects { effectsOverlay.start() }
             recordingHUD.show { [weak self] in
                 Task { await self?.stop() }
             }
         } catch {
-            statusMessage = "Failed: \(error.localizedDescription)"
+            statusMessage = "Couldn't start: \(error.localizedDescription)"
+            cameraOverlay.hide()
+            MainWindow.show()
         }
     }
 
     func stop() async {
         guard let stream else { return }
+        statusMessage = "Finishing…"
         do {
             try await stream.stopCapture()
         } catch {
             statusMessage = "Stop failed: \(error.localizedDescription)"
         }
-        cameraOverlay.hide()
-        effectsOverlay.stop()
-        recordingHUD.hide()
-        SCContentSharingPicker.shared.isActive = false
-        self.stream = nil
-        self.recordingOutput = nil
-        self.isRecording = false
+        // Wait (bounded) for SCRecordingOutput to finish writing the mp4 —
+        // checking the file before finalize is how "nothing was saved" happens.
+        if !fileFinalized {
+            await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+                finalizeContinuation = cont
+                Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(5))
+                    self?.finalizeContinuation?.resume()
+                    self?.finalizeContinuation = nil
+                }
+            }
+        }
+        cleanupAfterStream()
         guard let url = lastRecordingURL,
               FileManager.default.fileExists(atPath: url.path) else {
             statusMessage = "Recording failed — nothing was saved"
             return
         }
         statusMessage = "Saved"
-        // Always reveal the raw file immediately — never leave the user
-        // wondering where their video went while AI polish runs.
-        NSWorkspace.shared.activateFileViewerSelecting([url])
-        if autoPolish, let agent = agents.first {
-            await aiEditor.polish(url: url, agent: agent)
+        // Straight into the editor with the fresh video selected —
+        // recorder and editor are the same app, no window shuffle.
+        MainWindow.showVideos()
+        if autoPolish, let agent = activeAgent {
+            Task { await aiEditor.polish(url: url, agent: agent) }
         }
+    }
+
+    /// Re-round the live bubble when the shape changes in Settings.
+    func cameraShapeChanged() {
+        cameraOverlay.applyShape()
+    }
+
+    /// Flip the live bubble when the mirror toggle changes.
+    func cameraMirrorChanged() {
+        cameraOverlay.applyMirror()
+    }
+
+    /// Tear down everything tied to a live stream — used by both normal stop
+    /// and the stream-died-with-error path, so overlays never get stuck.
+    private func cleanupAfterStream() {
+        cameraOverlay.hide()
+        effectsOverlay.stop()
+        recordingHUD.hide()
+        stream = nil
+        recordingOutput = nil
+        isRecording = false
     }
 }
 
 extension RecorderEngine: SCStreamDelegate {
     nonisolated func stream(_ stream: SCStream, didStopWithError error: Error) {
         Task { @MainActor in
-            self.isRecording = false
+            self.cleanupAfterStream()
             self.statusMessage = "Stopped: \(error.localizedDescription)"
         }
     }
 }
 
-extension RecorderEngine: SCRecordingOutputDelegate {}
-
-extension RecorderEngine: SCContentSharingPickerObserver {
-    nonisolated func contentSharingPicker(_ picker: SCContentSharingPicker, didUpdateWith filter: SCContentFilter, for stream: SCStream?) {
-        picker.remove(self)
-        Task { @MainActor in await self.beginRecording(filter: filter) }
-    }
-
-    nonisolated func contentSharingPicker(_ picker: SCContentSharingPicker, didCancelFor stream: SCStream?) {
-        picker.remove(self)
+extension RecorderEngine: SCRecordingOutputDelegate {
+    nonisolated func recordingOutputDidFinishRecording(_ recordingOutput: SCRecordingOutput) {
         Task { @MainActor in
-            self.statusMessage = "Cancelled"
-            SCContentSharingPicker.shared.isActive = false
+            self.fileFinalized = true
+            self.finalizeContinuation?.resume()
+            self.finalizeContinuation = nil
         }
     }
 
-    nonisolated func contentSharingPickerStartDidFailWithError(_ error: Error) {
+    nonisolated func recordingOutput(_ recordingOutput: SCRecordingOutput, didFailWithError error: Error) {
         Task { @MainActor in
-            self.statusMessage = "Picker failed: \(error.localizedDescription)"
+            self.fileFinalized = true
+            self.statusMessage = "Recording failed: \(error.localizedDescription)"
+            self.finalizeContinuation?.resume()
+            self.finalizeContinuation = nil
         }
     }
 }

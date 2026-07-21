@@ -49,7 +49,7 @@ struct MenuView: View {
             HStack(spacing: 6) {
                 Image(systemName: "sparkles")
                     .foregroundStyle(recorder.agents.isEmpty ? .secondary : Color.purple)
-                if let agent = recorder.agents.first {
+                if let agent = recorder.activeAgent {
                     Text("Auto-polish with \(agent.displayName)")
                 } else {
                     Text("Install Claude Code or Codex for AI polish")
@@ -90,7 +90,7 @@ struct MenuView: View {
                     } label: { Image(systemName: "folder") }
                     .help("Show recordings")
 
-                    if let agent = recorder.agents.first, !recorder.aiEditor.isPolishing {
+                    if let agent = recorder.activeAgent, !recorder.aiEditor.isPolishing {
                         Button {
                             Task { await recorder.aiEditor.polish(url: url, agent: agent) }
                         } label: { Image(systemName: "wand.and.stars") }

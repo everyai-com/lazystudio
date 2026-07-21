@@ -13,6 +13,28 @@ import AppKit
 final class AIEditor: ObservableObject {
     @Published var isPolishing = false
     @Published var stage = ""
+    @Published var lastPolishedURL: URL?
+    @Published var lastTitle = ""
+    @Published var lastDescription = ""
+
+    /// Plan-only path for the editor: transcribe + ask the agent, return the
+    /// keep-ranges without exporting. The editor strip visualizes the plan.
+    func makePlan(url: URL, agent: AgentCLI, instruction: String? = nil) async throws -> EditPlan {
+        isPolishing = true
+        defer { isPolishing = false; stage = "" }
+        stage = "Listening to your video…"
+        let segments = try await Transcriber.transcribe(url: url)
+        let transcript = Transcriber.promptText(from: segments)
+        let duration = try await CMTimeGetSeconds(AVURLAsset(url: url).load(.duration))
+        stage = "Thinking about the best parts…"
+        let plan = try await requestPlan(
+            agent: agent, transcript: transcript, duration: duration,
+            instruction: instruction
+        )
+        lastTitle = plan.title
+        lastDescription = plan.description
+        return plan
+    }
 
     struct EditPlan: Decodable {
         struct Range: Decodable { let start: Double; let end: Double }
@@ -21,23 +43,26 @@ final class AIEditor: ObservableObject {
         let description: String
     }
 
-    func polish(url: URL, agent: AgentCLI) async {
+    func polish(url: URL, agent: AgentCLI, instruction: String? = nil) async {
         guard !isPolishing else { return }
         isPolishing = true
+        lastPolishedURL = nil
+        lastTitle = ""
         defer { isPolishing = false; stage = "" }
         do {
-            stage = "Transcribing…"
+            stage = "Listening to your video…"
             let segments = try await Transcriber.transcribe(url: url)
             let transcript = Transcriber.promptText(from: segments)
 
             let duration = try await CMTimeGetSeconds(AVURLAsset(url: url).load(.duration))
 
-            stage = "Asking \(agent.displayName)…"
+            stage = "Thinking about the best parts…"
             let plan = try await requestPlan(
-                agent: agent, transcript: transcript, duration: duration
+                agent: agent, transcript: transcript, duration: duration,
+                instruction: instruction
             )
 
-            stage = "Cutting & exporting…"
+            stage = "Snipping out the boring bits…"
             let output = try await applyCuts(source: url, plan: plan)
 
             let notes = """
@@ -55,13 +80,16 @@ final class AIEditor: ObservableObject {
                 .write(to: srtURL, atomically: true, encoding: .utf8)
 
             stage = "Done"
-            NSWorkspace.shared.activateFileViewerSelecting([output])
+            lastPolishedURL = output
+            lastTitle = plan.title
+            lastDescription = plan.description
         } catch {
             stage = "Failed: \(error.localizedDescription)"
         }
     }
 
-    private func requestPlan(agent: AgentCLI, transcript: String, duration: Double) async throws -> EditPlan {
+    private func requestPlan(agent: AgentCLI, transcript: String, duration: Double, instruction: String? = nil) async throws -> EditPlan {
+        let extra = instruction.map { "\n\nThe creator also asks: \($0)\nFollow this while keeping the rules above." } ?? ""
         let prompt = """
         You are a video editor. Below is a timestamped transcript of a \(Int(duration))-second screen recording destined for YouTube.
 
@@ -73,7 +101,7 @@ final class AIEditor: ObservableObject {
         {"keep": [{"start": 0.0, "end": 12.5}], "title": "...", "description": "..."}
 
         Transcript:
-        \(transcript)
+        \(transcript)\(extra)
         """
         let raw = try await agent.run(prompt: prompt)
         guard let jsonStart = raw.firstIndex(of: "{"),

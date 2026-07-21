@@ -4,6 +4,8 @@ import ServiceManagement
 struct SettingsView: View {
     @EnvironmentObject var recorder: RecorderEngine
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
+    @AppStorage(CameraOverlayController.shapeKey) private var cameraShape = "circle"
+    @AppStorage(CameraOverlayController.sizeKey) private var cameraSize = "medium"
 
     var body: some View {
         Form {
@@ -11,6 +13,23 @@ struct SettingsView: View {
                 Toggle("Microphone", isOn: $recorder.includeMicrophone)
                 Toggle("System Audio", isOn: $recorder.includeSystemAudio)
                 Toggle("Camera Bubble", isOn: $recorder.showCamera)
+                if recorder.showCamera {
+                    Picker("Bubble Shape", selection: $cameraShape) {
+                        Text("Round").tag("circle")
+                        Text("Square").tag("square")
+                    }
+                    .pickerStyle(.segmented)
+                    .onChange(of: cameraShape) { _, _ in recorder.cameraShapeChanged() }
+                    Picker("Bubble Size", selection: $cameraSize) {
+                        Text("Small").tag("small")
+                        Text("Medium").tag("medium")
+                        Text("Large").tag("large")
+                    }
+                    .pickerStyle(.segmented)
+                    Text("Tip: double-click the bubble while recording to switch shape; drag it anywhere.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Toggle("Cursor Spotlight & Click Ripples", isOn: $recorder.clickEffects)
                 LabeledContent("Recordings folder") {
                     Text(recorder.recordingsDirectory.path)

@@ -20,8 +20,8 @@
 	<string>1</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>15.0</string>
-	<key>LSUIElement</key>
-	<true/>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>LazyStudio opens Terminal to log in to your AI account (Claude or ChatGPT).</string>
 	<key>NSCameraUsageDescription</key>
 	<string>LazyStudio shows your camera in a floating bubble during recordings.</string>
 	<key>NSHighResolutionCapable</key>

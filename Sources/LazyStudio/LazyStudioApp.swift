@@ -32,14 +32,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.terminate(nil)
             return
         }
-        // Menu bar app: no Dock icon.
-        NSApp.setActivationPolicy(.accessory)
-        WelcomeWindow.showIfNeeded()
+        // Real app: Dock icon + menu bar ⏺, so it's always findable.
+        NSApp.setActivationPolicy(.regular)
+        // Recorder is created by the SwiftUI scene; open the home window
+        // on the next runloop tick once it exists.
+        DispatchQueue.main.async {
+            if WelcomeWindow.allPermissionsGranted {
+                MainWindow.show()
+            } else {
+                WelcomeWindow.showIfNeeded()
+            }
+        }
     }
 
-    // Double-clicking the app in Finder again brings up the welcome window.
+    // Closing the window must not quit the app — it lives in the Dock
+    // and menu bar until you actually hit Quit.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
+    }
+
+    // Clicking the Dock icon brings up the home window.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
-        WelcomeWindow.show()
+        MainWindow.show()
         return true
     }
 }
