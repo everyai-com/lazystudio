@@ -139,6 +139,12 @@ final class MCPServer {
                          "properties": ["video": ["type": "string"],
                                         "time": ["type": "number"]],
                          "required": ["video", "time"]]],
+        ["name": "ai_edit",
+         "description": "Run LazyStudio's built-in AI edit on a video: transcribe, plan cuts with the user's configured agent, and apply them to the live editor. Optional instruction guides the edit.",
+         "inputSchema": ["type": "object",
+                         "properties": ["video": ["type": "string"],
+                                        "instruction": ["type": "string"]],
+                         "required": ["video"]]],
         ["name": "export_video",
          "description": "Render the current keep/cut plan of this video to <name>.edited.mp4 and return its path.",
          "inputSchema": ["type": "object",
@@ -231,6 +237,35 @@ final class MCPServer {
                   let png = NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:])
             else { return text("Couldn't capture frame") }
             return [["type": "image", "data": png.base64EncodedString(), "mimeType": "image/png"]]
+
+        case "ai_edit":
+            guard let u = url(for: args["video"] as? String ?? "") else { return text("Video not found") }
+            guard let recorder, let agent = recorder.activeAgent else {
+                return text("No AI agent installed/selected")
+            }
+            let session: EditSession
+            if let s = LibraryView.activeSession, s.url == u {
+                session = s
+            } else {
+                session = EditSession(url: u)
+                await session.load()
+                LibraryView.adopt(session: session)
+            }
+            do {
+                let plan = try await recorder.aiEditor.makePlan(
+                    url: u, agent: agent,
+                    instruction: args["instruction"] as? String
+                )
+                await session.apply(keep: plan.keep, cuts: plan.cuts)
+                let cutList = (plan.cuts ?? []).map {
+                    String(format: "%.1f-%.1f %@", $0.start, $0.end, $0.reason)
+                }.joined(separator: "; ")
+                return text(String(format: "Edited with %@. kept %.1fs of %.1fs. cuts: %@. title: %@",
+                                   agent.displayName, session.keptDuration,
+                                   session.duration, cutList, plan.title))
+            } catch {
+                return text("AI edit failed: \(error.localizedDescription)")
+            }
 
         case "export_video":
             guard let u = url(for: args["video"] as? String ?? "") else { return text("Video not found") }

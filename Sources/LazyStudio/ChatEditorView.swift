@@ -3,29 +3,25 @@ import AppKit
 import AVFoundation
 
 /// Lovable-style AI editor: pick a video, chat on the left, and the agent
-/// (Claude Code / Codex) edits it live through LazyStudio's MCP tools —
-/// the preview and strip on the right move as it works.
+/// edits it live through LazyStudio's tools. History persists per video.
 struct ChatEditorView: View {
     @ObservedObject var recorder: RecorderEngine
+    @ObservedObject private var store = ChatStore.shared
     @StateObject private var model = LibraryModel()
     @State private var session: EditSession?
     @State private var pickedURL: URL?
-    @State private var messages: [ChatMessage] = []
     @State private var input = ""
     @State private var busy = false
-
-    struct ChatMessage: Identifiable {
-        let id = UUID()
-        let fromUser: Bool
-        let text: String
-        var activity: String?   // "✂ Timeline updated — kept 29s of 62s"
-    }
 
     private let suggestions = ["Cut the silences", "Keep it under a minute",
                                "Make it punchy", "Write me a title"]
 
     init(recorder: RecorderEngine) {
         self.recorder = recorder
+    }
+
+    private var messages: [ChatStore.Msg] {
+        pickedURL.map { store.thread(for: $0) } ?? []
     }
 
     var body: some View {
@@ -38,24 +34,25 @@ struct ChatEditorView: View {
         }
         .onAppear {
             model.refresh(dir: recorder.recordingsDirectory)
-            if pickedURL == nil, let first = model.items.first { pick(first.url) }
+            if pickedURL == nil {
+                // Come back to the same conversation you left.
+                let remembered = model.items.first { $0.url.lastPathComponent == store.lastVideo }
+                if let target = remembered ?? model.items.first { pick(target.url) }
+            }
         }
     }
 
     private func pick(_ url: URL) {
         pickedURL = url
+        store.rememberVideo(url)
         session?.player.pause()
         let s = EditSession(url: url)
         session = s
         LibraryView.activeSession = s   // MCP tools edit THIS session
         Task { await s.load() }
-        if messages.isEmpty {
-            messages.append(ChatMessage(fromUser: false, text:
-                "Hi! I'm your editor. Tell me what you want — \"cut the silences\", \"keep only the demo part\", \"make it snappy and under a minute\" — and I'll do it while you watch."))
-        }
     }
 
-    // MARK: - Chat
+    // MARK: - Chat column
 
     private var chatColumn: some View {
         VStack(spacing: 0) {
@@ -65,8 +62,7 @@ struct ChatEditorView: View {
                     .foregroundStyle(.purple)
                 Spacer()
                 Button {
-                    messages = []
-                    if let url = pickedURL { pick(url) }
+                    if let url = pickedURL { store.clear(for: url) }
                 } label: { Image(systemName: "square.and.pencil") }
                 .buttonStyle(.borderless)
                 .help("New chat")
@@ -89,6 +85,12 @@ struct ChatEditorView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 10) {
+                        if messages.isEmpty {
+                            Text("Hi! I'm your editor. Tell me what you want — \"cut the silences\", \"keep only the demo part\", \"make it snappy\" — and I'll do it while you watch.")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .padding(10)
+                        }
                         ForEach(messages) { msg in
                             VStack(alignment: .leading, spacing: 4) {
                                 HStack {
@@ -132,7 +134,6 @@ struct ChatEditorView: View {
             }
 
             Divider()
-            // Lovable-style suggestion chips
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     ForEach(suggestions, id: \.self) { s in
@@ -175,15 +176,18 @@ struct ChatEditorView: View {
         }
     }
 
+    // MARK: - Sending
+
     private func send() {
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !busy,
               let agent = recorder.activeAgent,
               let url = pickedURL, let session else { return }
         input = ""
-        messages.append(ChatMessage(fromUser: true, text: text))
+        store.append(.init(fromUser: true, text: text), for: url)
         busy = true
         let followUp = messages.filter(\.fromUser).count > 1
+        lslog("chat: send via \(agent.id) — \(text.prefix(80))")
 
         let state = session.segments.map {
             String(format: "%.1f-%.1f %@", $0.start, $0.end, $0.kept ? "KEEP" : "cut")
@@ -201,33 +205,47 @@ struct ChatEditorView: View {
 
         let keptBefore = session.keptDuration
         Task {
-            do {
-                let reply: String
-                if agent.id == "claude" {
-                    // Claude Code drives our MCP tools directly.
+            var reply = ""
+            var failure: String?
+            if agent.id == "claude" {
+                do {
                     reply = try await agent.chat(message: prompt, followUp: followUp)
-                } else {
-                    // Codex CLI can't reach HTTP MCP servers yet — planner
-                    // mode: ChatGPT writes the plan, the app applies it.
+                } catch {
+                    lslog("chat: claude direct failed — \(error.localizedDescription.prefix(300))")
+                    failure = error.localizedDescription
+                }
+            }
+            // Planner mode: primary for codex/gemini, automatic fallback
+            // when the direct path fails or comes back empty.
+            if agent.id != "claude" || reply.isEmpty {
+                do {
                     reply = try await plannerEdit(agent: agent, url: url,
                                                   session: session, request: text)
+                    failure = nil
+                } catch {
+                    lslog("chat: planner failed — \(error.localizedDescription.prefix(300))")
+                    failure = failure ?? error.localizedDescription
                 }
-                var msg = ChatMessage(fromUser: false,
+            }
+
+            if let failure, reply.isEmpty {
+                store.append(.init(fromUser: false,
+                    text: "That didn't work: \(failure)\n(Full details: ~/Library/Logs/LazyStudio.log)"),
+                    for: url)
+            } else {
+                var msg = ChatStore.Msg(fromUser: false,
                     text: reply.isEmpty ? "Done — check the strip on the right." : reply)
                 if abs(session.keptDuration - keptBefore) > 0.2 {
                     msg.activity = String(format: "Timeline updated — kept %.0fs of %.0fs",
                                           session.keptDuration, session.duration)
                 }
-                messages.append(msg)
-            } catch {
-                messages.append(ChatMessage(fromUser: false,
-                    text: "That didn't work: \(error.localizedDescription). Try again, or check the AI connection in My Videos → any video."))
+                store.append(msg, for: url)
             }
             busy = false
         }
     }
 
-    /// ChatGPT plans, LazyStudio applies — used when the brain is Codex.
+    /// The agent plans, LazyStudio applies — reliable in every setup.
     private func plannerEdit(agent: AgentCLI, url: URL,
                              session: EditSession, request: String) async throws -> String {
         let plan = try await recorder.aiEditor.makePlan(

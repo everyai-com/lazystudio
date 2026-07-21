@@ -163,6 +163,7 @@ struct AgentCLI: Identifiable, Sendable {
                 let data = out.fileHandleForReading.readDataToEndOfFile()
                 proc.waitUntilExit()
                 let text = String(decoding: data, as: UTF8.self)
+                lslog("agent \(self.id): exit=\(proc.terminationStatus) out=\(text.count)ch err=\(errData.count)ch — \(String(decoding: errData.prefix(200), as: UTF8.self))")
                 if proc.terminationStatus == 0 {
                     continuation.resume(returning: text)
                 } else {
