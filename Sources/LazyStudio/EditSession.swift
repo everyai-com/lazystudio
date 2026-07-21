@@ -25,6 +25,10 @@ final class EditSession: ObservableObject {
     @Published var filmstrip: [NSImage] = []
     @Published var transcript: [TranscriptSegment] = []
     @Published var isTranscribing = false
+    /// Playhead position in SOURCE time (pre-cut coordinates for the strip).
+    @Published var playhead: Double = 0
+    @Published var isPlaying = false
+    private var timeObserver: Any?
 
     var hasCuts: Bool { segments.contains { !$0.kept } }
     var keptRanges: [AIEditor.EditPlan.Range] {
@@ -40,8 +44,61 @@ final class EditSession: ObservableObject {
         segments = [Segment(start: 0, end: max(duration, 0.1), kept: true)]
         player.replaceCurrentItem(with: AVPlayerItem(asset: asset))
         loadFilmstrip()
+        installPlayheadObserver()
         // Auto-transcript: subtitles are just there, no button hunting.
         Task { await loadTranscript() }
+    }
+
+    // MARK: - Playhead / seek / play-pause
+
+    private func installPlayheadObserver() {
+        if let timeObserver { player.removeTimeObserver(timeObserver) }
+        timeObserver = player.addPeriodicTimeObserver(
+            forInterval: CMTime(value: 1, timescale: 30), queue: .main
+        ) { [weak self] t in
+            Task { @MainActor in
+                guard let self else { return }
+                self.playhead = self.sourceTime(fromPlayer: t.seconds)
+                self.isPlaying = self.player.rate != 0
+            }
+        }
+    }
+
+    /// Player time (composition skips cuts) → source-video time.
+    func sourceTime(fromPlayer t: Double) -> Double {
+        guard hasCuts else { return t }
+        var remaining = t
+        for r in keptRanges {
+            let len = r.end - r.start
+            if remaining <= len { return r.start + remaining }
+            remaining -= len
+        }
+        return duration
+    }
+
+    /// Source-video time → player time; nil if that moment is cut.
+    func playerTime(fromSource t: Double) -> Double? {
+        guard hasCuts else { return t }
+        var acc = 0.0
+        for r in keptRanges {
+            if t >= r.start && t <= r.end { return acc + (t - r.start) }
+            if t < r.start { return acc }   // inside a cut → snap to next kept
+            acc += r.end - r.start
+        }
+        return nil
+    }
+
+    /// Click anywhere on the strip to jump there.
+    func seek(toSource t: Double) {
+        let target = playerTime(fromSource: min(max(t, 0), duration)) ?? 0
+        player.seek(to: CMTime(seconds: target, preferredTimescale: 600),
+                    toleranceBefore: .zero, toleranceAfter: .zero)
+        playhead = t
+    }
+
+    /// Spacebar.
+    func togglePlay() {
+        if player.rate != 0 { player.pause() } else { player.play() }
     }
 
     /// A row of thumbnails across the whole video, drawn under the strip.

@@ -432,13 +432,60 @@ struct LibraryView: View {
 
                     trimHandle(session, edge: .leading, width: w, duration: dur)
                     trimHandle(session, edge: .trailing, width: w, duration: dur)
+
+                    // Playhead
+                    Rectangle()
+                        .fill(.white)
+                        .frame(width: 2, height: 44)
+                        .shadow(color: .black.opacity(0.6), radius: 2)
+                        .offset(x: w * session.playhead / dur - 1)
+                        .allowsHitTesting(false)
                 }
             }
             .frame(height: 44)
             .clipShape(RoundedRectangle(cornerRadius: 8))
-            Text("Click a piece to cut it or bring it back · drag the yellow ends to trim")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+
+            // Seek bar: click or drag anywhere to jump. Separate from the
+            // strip so seeking never fights with cut-toggling.
+            GeometryReader { geo in
+                let w = geo.size.width
+                let dur = max(session.duration, 0.1)
+                ZStack(alignment: .leading) {
+                    Capsule().fill(.white.opacity(0.12))
+                    Capsule()
+                        .fill(Theme.accent)
+                        .frame(width: max(3, w * session.playhead / dur))
+                }
+                .frame(height: 5)
+                .frame(maxHeight: .infinity)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { v in
+                            session.seek(toSource: Double(v.location.x / w) * dur)
+                        }
+                )
+            }
+            .frame(height: 14)
+
+            HStack {
+                Button {
+                    session.togglePlay()
+                } label: {
+                    Image(systemName: session.isPlaying ? "pause.fill" : "play.fill")
+                }
+                .buttonStyle(.borderless)
+                .keyboardShortcut(.space, modifiers: [])
+                Text(String(format: "%d:%02d / %d:%02d",
+                            Int(session.playhead) / 60, Int(session.playhead) % 60,
+                            Int(session.duration) / 60, Int(session.duration) % 60))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("Space to play · click the bar to seek · click a piece to cut/restore")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
         }
     }
 
@@ -510,6 +557,8 @@ struct LibraryView: View {
                                 .frame(width: 32, alignment: .trailing)
                             Text(line.text)
                                 .font(.caption)
+                                .onTapGesture { session.seek(toSource: line.start) }
+                                .help("Click to jump here")
                             Spacer(minLength: 4)
                             Button {
                                 Task { await session.markCut(from: line.start, to: line.end) }
