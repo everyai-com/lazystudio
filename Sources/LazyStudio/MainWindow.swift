@@ -280,6 +280,6 @@ private struct MainView: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 12))
-        .animation(.easeOut(duration: 0.15), value: active)
+        .animation(.lsSnappy(0.15), value: active)
     }
 }

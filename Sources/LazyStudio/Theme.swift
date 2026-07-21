@@ -18,6 +18,23 @@ enum Theme {
     }
 }
 
+extension Animation {
+    /// Strong ease-out (cubic-bezier 0.23,1,0.32,1) — built-in curves are too
+    /// weak; UI motion stays under 300ms and never eases in.
+    static func lsSnappy(_ duration: Double = 0.18) -> Animation {
+        .timingCurve(0.23, 1, 0.32, 1, duration: duration)
+    }
+}
+
+/// Press feedback for plain/card buttons: instant, on press — not on release.
+struct PressableStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.975 : 1)
+            .animation(.lsSnappy(0.12), value: configuration.isPressed)
+    }
+}
+
 /// Soft elevated card used across panels.
 struct CardBackground: ViewModifier {
     var radius: CGFloat = 14

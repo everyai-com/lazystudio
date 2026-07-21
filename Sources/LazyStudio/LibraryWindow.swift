@@ -159,11 +159,20 @@ struct LibraryView: View {
                     .buttonStyle(.borderless)
                 }
                 if model.items.isEmpty {
-                    VStack(spacing: 10) {
-                        Image(systemName: "film.stack")
-                            .font(.system(size: 40))
-                            .foregroundStyle(.tertiary)
-                        Text("No videos yet. Hit Record and make one!")
+                    // Empty state is rare — a touch of delight is allowed here.
+                    VStack(spacing: 12) {
+                        ZStack {
+                            Circle()
+                                .fill(Theme.purple.opacity(0.1))
+                                .frame(width: 84, height: 84)
+                            Image(systemName: "film.stack")
+                                .font(.system(size: 36))
+                                .foregroundStyle(Theme.brandGradient)
+                                .symbolEffect(.pulse, options: .repeat(3))
+                        }
+                        Text("No videos yet")
+                            .font(.title3.bold())
+                        Text("Hit Record — the AI takes it from there.")
                             .foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity)
@@ -262,10 +271,11 @@ struct LibraryView: View {
                 )
                 .shadow(color: .black.opacity(hovering ? 0.18 : 0.07),
                         radius: hovering ? 12 : 6, y: hovering ? 6 : 3)
-                .scaleEffect(hovering ? 1.02 : 1)
-                .animation(.spring(duration: 0.25), value: hovering)
+                .scaleEffect(hovering ? 1.015 : 1)
+                // Hover fires constantly — keep it fast, no bounce.
+                .animation(.lsSnappy(0.15), value: hovering)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressableStyle())
             .onHover { hovering = $0 }
         }
     }
@@ -387,6 +397,8 @@ struct LibraryView: View {
                         let sw = max(4, w * seg.length / dur)
                         Rectangle()
                             .fill(seg.kept ? Color.clear : Color.black.opacity(0.62))
+                            // Cut/keep is a state change — ease it, don't jump.
+                            .animation(.lsSnappy(0.2), value: seg.kept)
                             .overlay(
                                 Rectangle()
                                     .strokeBorder(
