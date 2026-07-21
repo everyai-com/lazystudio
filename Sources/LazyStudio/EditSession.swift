@@ -222,6 +222,45 @@ final class EditSession: ObservableObject {
         await rebuildPreview()
     }
 
+    /// OpenCut "Q": cut everything from the previous boundary to the playhead.
+    /// Park the playhead where the good take resumes, hit Q, dead air gone.
+    func cutLeftOfPlayhead() async {
+        let t = playhead
+        guard let i = segments.firstIndex(where: { t > $0.start + 0.15 && t < $0.end - 0.15 })
+        else { return }
+        pushUndo()
+        let seg = segments[i]
+        segments[i] = Segment(start: seg.start, end: t, kept: false, note: "cut to here")
+        segments.insert(Segment(start: t, end: seg.end, kept: seg.kept, note: seg.note), at: i + 1)
+        await rebuildPreview()
+    }
+
+    /// OpenCut "W": cut from the playhead to the next boundary.
+    func cutRightOfPlayhead() async {
+        let t = playhead
+        guard let i = segments.firstIndex(where: { t > $0.start + 0.15 && t < $0.end - 0.15 })
+        else { return }
+        pushUndo()
+        let seg = segments[i]
+        segments[i] = Segment(start: seg.start, end: t, kept: seg.kept, note: seg.note)
+        segments.insert(Segment(start: t, end: seg.end, kept: false, note: "cut from here"), at: i + 1)
+        await rebuildPreview()
+    }
+
+    /// J/K/L-style speed control: L cycles 1×→1.5×→2×, K pauses.
+    func cyclePlaybackSpeed() {
+        let next: Float = switch player.rate {
+        case 0..<1.2: 1.5
+        case 1.2..<1.8: 2.0
+        default: 1.0
+        }
+        player.rate = next
+    }
+
+    func nudge(by seconds: Double) {
+        seek(toSource: playhead + seconds)
+    }
+
     /// Click a segment to cut it or bring it back.
     func toggle(_ id: Segment.ID) async {
         guard let i = segments.firstIndex(where: { $0.id == id }) else { return }

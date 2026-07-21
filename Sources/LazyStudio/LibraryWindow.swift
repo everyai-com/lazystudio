@@ -424,6 +424,19 @@ struct LibraryView: View {
                             .offset(x: x)
                             .contentShape(Rectangle())
                             .onTapGesture { Task { await session.toggle(seg.id) } }
+                            .contextMenu {
+                                Button(seg.kept ? "Cut this piece" : "Bring it back") {
+                                    Task { await session.toggle(seg.id) }
+                                }
+                                Button("Split here") {
+                                    session.seek(toSource: (seg.start + seg.end) / 2)
+                                    Task { await session.splitAtPlayhead() }
+                                }
+                                Button("Play from here") {
+                                    session.seek(toSource: seg.start)
+                                    session.player.play()
+                                }
+                            }
                             .help(String(format: "%@ %.1fs–%.1fs — click to %@",
                                          seg.kept ? "Keeping" : "Cut",
                                          seg.start, seg.end,
@@ -482,6 +495,37 @@ struct LibraryView: View {
                 .buttonStyle(.borderless)
                 .keyboardShortcut("s", modifiers: [])
                 .help("Split at playhead (S) — then click a piece to cut it")
+                Button {
+                    Task { await session.cutLeftOfPlayhead() }
+                } label: { Image(systemName: "arrow.left.to.line.compact") }
+                .buttonStyle(.borderless)
+                .keyboardShortcut("q", modifiers: [])
+                .help("Cut everything left of the playhead to the last boundary (Q)")
+                Button {
+                    Task { await session.cutRightOfPlayhead() }
+                } label: { Image(systemName: "arrow.right.to.line.compact") }
+                .buttonStyle(.borderless)
+                .keyboardShortcut("w", modifiers: [])
+                .help("Cut from the playhead to the next boundary (W)")
+
+                // Hidden speed/step keys: L speed, K pause, arrows step.
+                Group {
+                    Button("") { session.cyclePlaybackSpeed() }
+                        .keyboardShortcut("l", modifiers: [])
+                    Button("") { session.player.pause() }
+                        .keyboardShortcut("k", modifiers: [])
+                    Button("") { session.nudge(by: -1.0 / 30.0) }
+                        .keyboardShortcut(.leftArrow, modifiers: [])
+                    Button("") { session.nudge(by: 1.0 / 30.0) }
+                        .keyboardShortcut(.rightArrow, modifiers: [])
+                    Button("") { session.nudge(by: -5) }
+                        .keyboardShortcut(.leftArrow, modifiers: .shift)
+                    Button("") { session.nudge(by: 5) }
+                        .keyboardShortcut(.rightArrow, modifiers: .shift)
+                }
+                .buttonStyle(.plain)
+                .frame(width: 0, height: 0)
+                .opacity(0)
                 Button {
                     Task { await session.undo() }
                 } label: { Image(systemName: "arrow.uturn.backward") }
