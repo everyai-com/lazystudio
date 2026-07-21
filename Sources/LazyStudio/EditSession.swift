@@ -1,5 +1,6 @@
 import Foundation
 @preconcurrency import AVFoundation
+import AppKit
 
 /// The recording IS the project: a list of keep/cut segments over the raw
 /// file. The AI drafts the list, clicks revise it, nothing is destructive
@@ -19,6 +20,9 @@ final class EditSession: ObservableObject {
     @Published var duration: Double = 0
     @Published var segments: [Segment] = []
     @Published var isExporting = false
+    @Published var filmstrip: [NSImage] = []
+    @Published var transcript: [TranscriptSegment] = []
+    @Published var isTranscribing = false
 
     var hasCuts: Bool { segments.contains { !$0.kept } }
     var keptRanges: [AIEditor.EditPlan.Range] {
@@ -33,6 +37,55 @@ final class EditSession: ObservableObject {
         duration = (try? await CMTimeGetSeconds(asset.load(.duration))) ?? 0
         segments = [Segment(start: 0, end: max(duration, 0.1), kept: true)]
         player.replaceCurrentItem(with: AVPlayerItem(asset: asset))
+        loadFilmstrip()
+    }
+
+    /// A row of thumbnails across the whole video, drawn under the strip.
+    private func loadFilmstrip(count: Int = 14) {
+        let url = url, duration = duration
+        guard duration > 0 else { return }
+        Task.detached(priority: .utility) {
+            let gen = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+            gen.appliesPreferredTrackTransform = true
+            gen.maximumSize = CGSize(width: 160, height: 160)
+            gen.requestedTimeToleranceBefore = CMTime(seconds: 0.5, preferredTimescale: 600)
+            gen.requestedTimeToleranceAfter = CMTime(seconds: 0.5, preferredTimescale: 600)
+            var images: [NSImage] = []
+            for i in 0..<count {
+                let t = duration * (Double(i) + 0.5) / Double(count)
+                if let cg = try? await gen.image(
+                    at: CMTime(seconds: t, preferredTimescale: 600)
+                ).image {
+                    images.append(NSImage(cgImage: cg, size: .zero))
+                }
+            }
+            let final = images
+            await MainActor.run { [weak self] in self?.filmstrip = final }
+        }
+    }
+
+    /// Mark [from, to] as cut, splitting whatever segments it crosses.
+    /// Used by the trim handles and the transcript's per-line delete.
+    func markCut(from s: Double, to e: Double) async {
+        let s = max(0, min(s, duration)), e = max(s, min(e, duration))
+        guard e - s > 0.05 else { return }
+        var out: [Segment] = []
+        for seg in segments {
+            if seg.end <= s || seg.start >= e { out.append(seg); continue }
+            if seg.start < s { out.append(Segment(start: seg.start, end: s, kept: seg.kept)) }
+            out.append(Segment(start: max(seg.start, s), end: min(seg.end, e), kept: false))
+            if seg.end > e { out.append(Segment(start: e, end: seg.end, kept: seg.kept)) }
+        }
+        segments = out.filter { $0.length > 0.05 }
+        await rebuildPreview()
+    }
+
+    /// On-device transcript so lines can be deleted like text (Loom-style).
+    func loadTranscript() async {
+        guard transcript.isEmpty, !isTranscribing else { return }
+        isTranscribing = true
+        defer { isTranscribing = false }
+        transcript = (try? await Transcriber.transcribe(url: url)) ?? []
     }
 
     /// Turn an AI keep-plan into visible kept/cut segments.

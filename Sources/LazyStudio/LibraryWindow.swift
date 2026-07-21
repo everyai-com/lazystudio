@@ -182,6 +182,7 @@ struct LibraryView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 12))
 
                     segmentStrip(session)
+                    transcriptPanel(session)
 
                     HStack {
                         Text(item.name)
@@ -233,37 +234,172 @@ struct LibraryView: View {
         }
     }
 
-    /// The timeline strip: blue = kept, dimmed = cut. Click to flip.
+    /// Filmstrip timeline: thumbnails under keep/cut segments. Click a piece
+    /// to flip it; drag the ends to trim the start/finish.
     private func segmentStrip(_ session: EditSession) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             GeometryReader { geo in
-                HStack(spacing: 2) {
+                let w = geo.size.width
+                let dur = max(session.duration, 0.1)
+                ZStack(alignment: .leading) {
+                    // Filmstrip background
+                    HStack(spacing: 0) {
+                        ForEach(Array(session.filmstrip.enumerated()), id: \.offset) { _, img in
+                            Image(nsImage: img)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: w / CGFloat(max(session.filmstrip.count, 1)),
+                                       height: 44)
+                                .clipped()
+                        }
+                    }
+                    .frame(width: w, height: 44)
+
+                    // Keep/cut overlays
                     ForEach(session.segments) { seg in
-                        RoundedRectangle(cornerRadius: 5)
-                            .fill(seg.kept ? Color.accentColor.opacity(0.8)
-                                           : Color.gray.opacity(0.22))
-                            .frame(width: max(
-                                7,
-                                (geo.size.width - CGFloat(session.segments.count) * 2)
-                                    * seg.length / max(session.duration, 0.1)
-                            ))
-                            .onTapGesture {
-                                Task { await session.toggle(seg.id) }
+                        let x = w * seg.start / dur
+                        let sw = max(4, w * seg.length / dur)
+                        Rectangle()
+                            .fill(seg.kept ? Color.clear : Color.black.opacity(0.62))
+                            .overlay(
+                                Rectangle()
+                                    .strokeBorder(
+                                        seg.kept ? Color.accentColor : Color.clear,
+                                        lineWidth: session.hasCuts ? 2 : 0
+                                    )
+                            )
+                            .overlay(alignment: .center) {
+                                if !seg.kept, sw > 22 {
+                                    Image(systemName: "scissors")
+                                        .font(.caption2)
+                                        .foregroundStyle(.white.opacity(0.85))
+                                }
                             }
+                            .frame(width: sw, height: 44)
+                            .offset(x: x)
+                            .contentShape(Rectangle())
+                            .onTapGesture { Task { await session.toggle(seg.id) } }
                             .help(String(format: "%@ %.1fs–%.1fs — click to %@",
-                                         seg.kept ? "Keeping" : "Cut,",
+                                         seg.kept ? "Keeping" : "Cut",
                                          seg.start, seg.end,
                                          seg.kept ? "cut it" : "bring it back"))
                     }
+
+                    // Trim handles at both ends
+                    trimHandle(session, edge: .leading, width: w, duration: dur)
+                    trimHandle(session, edge: .trailing, width: w, duration: dur)
                 }
             }
-            .frame(height: 30)
-            if session.hasCuts {
-                Text("Blue parts stay, gray parts get cut. Click any piece to change your mind.")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+            .frame(height: 44)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            Text("Click a piece to cut it or bring it back · drag the yellow ends to trim")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+    }
+
+    private enum TrimEdge { case leading, trailing }
+
+    @State private var trimDrag: CGFloat = 0
+
+    private func trimHandle(_ session: EditSession, edge: TrimEdge,
+                            width: CGFloat, duration: Double) -> some View {
+        let isLeading = edge == .leading
+        return RoundedRectangle(cornerRadius: 3)
+            .fill(.yellow)
+            .frame(width: 7, height: 44)
+            .offset(x: isLeading ? max(0, trimDragFor(edge))
+                                 : width - 7 + min(0, trimDragFor(edge)))
+            .frame(maxWidth: .infinity, alignment: isLeading ? .leading : .trailing)
+            .gesture(
+                DragGesture()
+                    .onChanged { v in
+                        if edge == activeTrimEdge || activeTrimEdge == nil {
+                            activeTrimEdge = edge
+                            trimDrag = v.translation.width
+                        }
+                    }
+                    .onEnded { v in
+                        let dt = Double(abs(v.translation.width) / width) * duration
+                        activeTrimEdge = nil
+                        trimDrag = 0
+                        Task {
+                            if isLeading, v.translation.width > 0 {
+                                await session.markCut(from: 0, to: dt)
+                            } else if !isLeading, v.translation.width < 0 {
+                                await session.markCut(from: duration - dt, to: duration)
+                            }
+                        }
+                    }
+            )
+    }
+
+    @State private var activeTrimEdge: TrimEdge?
+
+    private func trimDragFor(_ edge: TrimEdge) -> CGFloat {
+        activeTrimEdge == edge ? trimDrag : 0
+    }
+
+    /// Loom-style "edit by transcript": delete a sentence, the video cuts it.
+    private func transcriptPanel(_ session: EditSession) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if session.isTranscribing {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Reading your words…").font(.caption)
+                }
+            } else if session.transcript.isEmpty {
+                Button {
+                    Task { await session.loadTranscript() }
+                } label: {
+                    Label("Edit by transcript", systemImage: "text.quote")
+                }
+                .font(.caption)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(transcriptLines(session), id: \.start) { line in
+                            HStack(alignment: .top, spacing: 6) {
+                                Text(String(format: "%d:%02d", Int(line.start) / 60, Int(line.start) % 60))
+                                    .font(.caption2.monospacedDigit())
+                                    .foregroundStyle(.tertiary)
+                                    .frame(width: 32, alignment: .trailing)
+                                Text(line.text)
+                                    .font(.caption)
+                                Spacer(minLength: 4)
+                                Button {
+                                    Task { await session.markCut(from: line.start, to: line.end) }
+                                } label: {
+                                    Image(systemName: "scissors")
+                                }
+                                .buttonStyle(.borderless)
+                                .help("Cut this line from the video")
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
+                }
+                .frame(maxHeight: 130)
             }
         }
+    }
+
+    /// Group word segments into readable lines for the transcript list.
+    private func transcriptLines(_ session: EditSession) -> [(start: Double, end: Double, text: String)] {
+        var lines: [(Double, Double, String)] = []
+        var words: [String] = []
+        var s: Double? = nil, e = 0.0
+        for seg in session.transcript {
+            if s == nil { s = seg.start }
+            words.append(seg.text)
+            e = seg.end
+            if e - (s ?? e) >= 6 || words.count >= 14 {
+                lines.append((s!, e, words.joined(separator: " ")))
+                words = []; s = nil
+            }
+        }
+        if let s, !words.isEmpty { lines.append((s, e, words.joined(separator: " "))) }
+        return lines.map { (start: $0.0, end: $0.1, text: $0.2) }
     }
 
     private func aiPanel(for item: VideoItem) -> some View {

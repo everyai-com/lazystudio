@@ -182,9 +182,11 @@ final class RecorderEngine: NSObject, ObservableObject {
             self.statusMessage = "Recording…"
 
             if clickEffects { effectsOverlay.start() }
-            recordingHUD.show { [weak self] in
+            recordingHUD.show(onStop: { [weak self] in
                 Task { await self?.stop() }
-            }
+            }, onCancel: { [weak self] in
+                Task { await self?.cancelRecording() }
+            })
         } catch {
             statusMessage = "Couldn't start: \(error.localizedDescription)"
             cameraOverlay.hide()
@@ -235,6 +237,19 @@ final class RecorderEngine: NSObject, ObservableObject {
     /// Flip the live bubble when the mirror toggle changes.
     func cameraMirrorChanged() {
         cameraOverlay.applyMirror()
+    }
+
+    /// Trash-can on the REC pill: stop and throw the file away.
+    func cancelRecording() async {
+        guard let stream else { return }
+        try? await stream.stopCapture()
+        cleanupAfterStream()
+        if let url = lastRecordingURL {
+            try? FileManager.default.removeItem(at: url)
+        }
+        lastRecordingURL = nil
+        statusMessage = "Discarded"
+        MainWindow.show()
     }
 
     /// Tear down everything tied to a live stream — used by both normal stop

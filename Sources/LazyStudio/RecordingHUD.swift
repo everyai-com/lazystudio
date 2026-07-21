@@ -10,12 +10,13 @@ final class RecordingHUDController {
     private var startedAt = Date()
     private let model = HUDModel()
 
-    func show(onStop: @escaping () -> Void) {
+    func show(onStop: @escaping () -> Void, onCancel: @escaping () -> Void = {}) {
         hide()
         guard let screen = NSScreen.main else { return }
         startedAt = Date()
         model.elapsed = "00:00"
         model.onStop = onStop
+        model.onCancel = onCancel
 
         let hosting = NSHostingController(rootView: HUDView(model: model))
         let panel = NSPanel(
@@ -66,6 +67,7 @@ final class RecordingHUDController {
 final class HUDModel: ObservableObject {
     @Published var elapsed = "00:00"
     var onStop: () -> Void = {}
+    var onCancel: () -> Void = {}
 }
 
 private struct HUDView: View {
@@ -91,6 +93,14 @@ private struct HUDView: View {
             .buttonStyle(.borderedProminent)
             .tint(.red)
             .controlSize(.small)
+            Button {
+                model.onCancel()
+            } label: {
+                Image(systemName: "trash")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .help("Discard this recording")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
