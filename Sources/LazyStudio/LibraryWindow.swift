@@ -2,24 +2,12 @@ import SwiftUI
 import AppKit
 import AVFoundation
 
-/// Loom-style library: thumbnail list on the left, player + AI edit panel
-/// on the right (like Loom's video page with its purple "Loom AI" card).
+/// Legacy standalone window (kept for compatibility) — the real UI lives in
+/// LibraryView inside the app shell.
 @MainActor
 enum LibraryWindow {
-    private static var window: NSWindow?
-
     static func show(recorder: RecorderEngine) {
-        if let window { window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); return }
-        let hosting = NSHostingController(rootView: LibraryView(recorder: recorder))
-        let w = NSWindow(contentViewController: hosting)
-        w.title = "My Videos"
-        w.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-        w.setContentSize(NSSize(width: 960, height: 620))
-        w.isReleasedWhenClosed = false
-        w.center()
-        w.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
-        window = w
+        MainWindow.showVideos()
     }
 }
 
@@ -28,7 +16,9 @@ struct VideoItem: Identifiable, Hashable {
     let date: Date
     var id: URL { url }
     var name: String { url.deletingPathExtension().lastPathComponent }
-    var isPolished: Bool { url.lastPathComponent.contains("polished") }
+    var isPolished: Bool {
+        url.lastPathComponent.contains("polished") || url.lastPathComponent.contains("edited")
+    }
 }
 
 @MainActor
@@ -36,6 +26,7 @@ final class LibraryModel: ObservableObject {
     @Published var items: [VideoItem] = []
     @Published var selected: VideoItem?
     @Published var thumbnails: [URL: NSImage] = [:]
+    @Published var durations: [URL: Double] = [:]
 
     func refresh(dir: URL) {
         let files = (try? FileManager.default.contentsOfDirectory(
@@ -49,23 +40,23 @@ final class LibraryModel: ObservableObject {
                 return VideoItem(url: $0, date: d)
             }
             .sorted { $0.date > $1.date }
-        if selected == nil || !items.contains(where: { $0.id == selected?.id }) {
-            selected = items.first
-        }
         for item in items where thumbnails[item.url] == nil {
-            loadThumbnail(item.url)
+            loadMeta(item.url)
         }
     }
 
-    private func loadThumbnail(_ url: URL) {
+    private func loadMeta(_ url: URL) {
         Task.detached(priority: .utility) {
-            let gen = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+            let asset = AVURLAsset(url: url)
+            let dur = (try? await CMTimeGetSeconds(asset.load(.duration))) ?? 0
+            let gen = AVAssetImageGenerator(asset: asset)
             gen.appliesPreferredTrackTransform = true
-            gen.maximumSize = CGSize(width: 480, height: 480)
-            guard let cg = try? await gen.image(at: CMTime(seconds: 0.4, preferredTimescale: 600)).image
-            else { return }
-            let img = NSImage(cgImage: cg, size: .zero)
-            await MainActor.run { [weak self] in self?.thumbnails[url] = img }
+            gen.maximumSize = CGSize(width: 640, height: 640)
+            let cg = try? await gen.image(at: CMTime(seconds: min(0.4, dur / 2), preferredTimescale: 600)).image
+            await MainActor.run { [weak self] in
+                self?.durations[url] = dur
+                if let cg { self?.thumbnails[url] = NSImage(cgImage: cg, size: .zero) }
+            }
         }
     }
 }
@@ -94,16 +85,21 @@ struct LibraryView: View {
     }
 
     var body: some View {
-        HSplitView {
-            sidebar
-                .frame(minWidth: 260, maxWidth: 320)
-            detail
-                .frame(minWidth: 520, maxWidth: .infinity, maxHeight: .infinity)
+        Group {
+            if let item = model.selected, let session {
+                editorScreen(item: item, session: session)
+            } else {
+                gridView
+            }
         }
         .onAppear { model.refresh(dir: recorder.recordingsDirectory) }
         .onReceive(NotificationCenter.default.publisher(for: .lsShowVideos)) { _ in
             model.selected = nil
             model.refresh(dir: recorder.recordingsDirectory)
+            // Fresh recording: drop straight into its editor.
+            if let newest = model.items.first(where: { !$0.isPolished }) {
+                model.selected = newest
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .lsAdoptSession)) { note in
             // An agent (via MCP) started editing a video — show it.
@@ -131,140 +127,204 @@ struct LibraryView: View {
         .onChange(of: editor.isPolishing) { _, polishing in
             if !polishing { model.refresh(dir: recorder.recordingsDirectory) }
         }
-    }
-
-    private var sidebar: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("Videos")
-                    .font(.title3.bold())
-                Spacer()
-                Button {
+        .confirmationDialog(
+            "Move this video to the Trash?",
+            isPresented: Binding(get: { confirmDelete != nil },
+                                 set: { if !$0 { confirmDelete = nil } })
+        ) {
+            Button("Move to Trash", role: .destructive) {
+                if let item = confirmDelete {
+                    try? FileManager.default.trashItem(at: item.url, resultingItemURL: nil)
+                    confirmDelete = nil
+                    if model.selected == item { model.selected = nil }
                     model.refresh(dir: recorder.recordingsDirectory)
-                } label: { Image(systemName: "arrow.clockwise") }
-                .buttonStyle(.borderless)
-            }
-            .padding(12)
-            Divider()
-            if model.items.isEmpty {
-                Spacer()
-                VStack(spacing: 8) {
-                    Image(systemName: "film.stack")
-                        .font(.system(size: 34))
-                        .foregroundStyle(.tertiary)
-                    Text("No videos yet.\nHit Record and make one!")
-                        .multilineTextAlignment(.center)
-                        .foregroundStyle(.secondary)
                 }
-                Spacer()
-            } else {
-                List(model.items, selection: $model.selected) { item in
-                    HStack(spacing: 10) {
-                        Group {
-                            if let thumb = model.thumbnails[item.url] {
-                                Image(nsImage: thumb).resizable().scaledToFill()
-                            } else {
-                                Rectangle().fill(.quaternary)
-                            }
-                        }
-                        .frame(width: 84, height: 48)
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                        VStack(alignment: .leading, spacing: 3) {
-                            HStack(spacing: 4) {
-                                if item.isPolished {
-                                    Image(systemName: "sparkles")
-                                        .font(.caption2)
-                                        .foregroundStyle(.purple)
-                                }
-                                Text(item.isPolished ? "Polished" : "Recording")
-                                    .font(.callout.weight(.semibold))
-                                    .lineLimit(1)
-                            }
-                            Text(item.date.formatted(date: .abbreviated, time: .shortened))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .tag(item)
-                    .padding(.vertical, 3)
-                }
-                .listStyle(.sidebar)
             }
         }
     }
 
-    @ViewBuilder
-    private var detail: some View {
-        if let item = model.selected, let session {
-            HStack(alignment: .top, spacing: 0) {
-                // Player + segment strip
-                VStack(alignment: .leading, spacing: 10) {
-                    PlayerView(player: session.player)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
+    // MARK: - Library grid (Loom-style)
 
-                    segmentStrip(session)
-                    transcriptPanel(session)
-
-                    HStack {
-                        Text(item.name)
-                            .font(.headline)
-                            .lineLimit(1)
-                        if session.hasCuts {
-                            Text("\(Int(session.keptDuration))s of \(Int(session.duration))s kept")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Button {
-                            NSWorkspace.shared.activateFileViewerSelecting([item.url])
-                        } label: { Label("Show in Finder", systemImage: "folder") }
-                        Button(role: .destructive) {
-                            confirmDelete = item
-                        } label: { Image(systemName: "trash") }
-                    }
-                }
-                .padding(14)
-
-                // Loom-style AI card
-                aiPanel(for: item)
-                    .frame(width: 270)
-                    .padding([.top, .trailing, .bottom], 14)
-            }
-            .confirmationDialog(
-                "Move this video to the Trash?",
-                isPresented: Binding(get: { confirmDelete != nil },
-                                     set: { if !$0 { confirmDelete = nil } })
-            ) {
-                Button("Move to Trash", role: .destructive) {
-                    if let item = confirmDelete {
-                        try? FileManager.default.trashItem(at: item.url, resultingItemURL: nil)
-                        confirmDelete = nil
+    private var gridView: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    Text("My Videos")
+                        .font(.title2.bold())
+                    Spacer()
+                    Button {
                         model.refresh(dir: recorder.recordingsDirectory)
+                    } label: { Image(systemName: "arrow.clockwise") }
+                    .buttonStyle(.borderless)
+                }
+                if model.items.isEmpty {
+                    VStack(spacing: 10) {
+                        Image(systemName: "film.stack")
+                            .font(.system(size: 40))
+                            .foregroundStyle(.tertiary)
+                        Text("No videos yet. Hit Record and make one!")
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 80)
+                } else {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: 16)],
+                              spacing: 16) {
+                        ForEach(model.items) { item in
+                            videoCard(item)
+                        }
                     }
                 }
             }
-        } else {
-            VStack {
-                Image(systemName: "sparkles.tv")
-                    .font(.system(size: 44))
-                    .foregroundStyle(.tertiary)
-                Text("Pick a video on the left")
+            .padding(18)
+        }
+    }
+
+    private func videoCard(_ item: VideoItem) -> some View {
+        Button {
+            model.selected = item
+        } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                ZStack(alignment: .bottomTrailing) {
+                    Group {
+                        if let thumb = model.thumbnails[item.url] {
+                            Image(nsImage: thumb).resizable().scaledToFill()
+                        } else {
+                            Rectangle().fill(.quaternary)
+                        }
+                    }
+                    .frame(height: 118)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    if let d = model.durations[item.url], d > 0 {
+                        Text(String(format: "%d:%02d", Int(d) / 60, Int(d) % 60))
+                            .font(.caption2.bold().monospacedDigit())
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(.black.opacity(0.7), in: Capsule())
+                            .foregroundStyle(.white)
+                            .padding(6)
+                    }
+                }
+                HStack(spacing: 4) {
+                    if item.isPolished {
+                        Image(systemName: "sparkles")
+                            .font(.caption2)
+                            .foregroundStyle(.purple)
+                    }
+                    Text(item.name)
+                        .font(.callout.weight(.medium))
+                        .lineLimit(1)
+                }
+                Text(item.date.formatted(date: .abbreviated, time: .shortened))
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Editor screen
+
+    private func editorScreen(item: VideoItem, session: EditSession) -> some View {
+        VStack(spacing: 0) {
+            // Top bar
+            HStack(spacing: 12) {
+                Button {
+                    model.selected = nil
+                } label: {
+                    Label("Library", systemImage: "chevron.left")
+                }
+                .buttonStyle(.borderless)
+                Text(item.name)
+                    .font(.headline)
+                    .lineLimit(1)
+                if session.hasCuts {
+                    Text("\(Int(session.keptDuration))s of \(Int(session.duration))s kept")
+                        .font(.caption.bold())
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(.purple.opacity(0.14), in: Capsule())
+                        .foregroundStyle(.purple)
+                }
+                Spacer()
+                Button {
+                    NSWorkspace.shared.activateFileViewerSelecting([item.url])
+                } label: { Image(systemName: "folder") }
+                .help("Show in Finder")
+                Button(role: .destructive) {
+                    confirmDelete = item
+                } label: { Image(systemName: "trash") }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            Divider()
+
+            HStack(alignment: .top, spacing: 0) {
+                // Stage: dark background so any format (portrait, square,
+                // widescreen) shows at its true shape, letterboxed.
+                VStack(spacing: 10) {
+                    PlayerView(player: session.player)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color.black)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                    segmentStrip(session)
+                }
+                .padding(14)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                // Right rail: AI + what got cut + transcript
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        aiPanel(for: item)
+                        if session.hasCuts { removedPanel(session) }
+                        transcriptPanel(session)
+                    }
+                    .padding(12)
+                }
+                .frame(width: 290)
+                .background(.purple.opacity(0.04))
+            }
         }
     }
 
-    /// Filmstrip timeline: thumbnails under keep/cut segments. Click a piece
-    /// to flip it; drag the ends to trim the start/finish.
+    /// "What the AI removed" — every cut with its reason, restorable.
+    private func removedPanel(_ session: EditSession) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("What got cut", systemImage: "scissors")
+                .font(.subheadline.bold())
+            ForEach(session.segments.filter { !$0.kept }) { seg in
+                HStack(spacing: 6) {
+                    Text(String(format: "%d:%02d–%d:%02d",
+                                Int(seg.start) / 60, Int(seg.start) % 60,
+                                Int(seg.end) / 60, Int(seg.end) % 60))
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    Text(seg.note ?? "cut")
+                        .font(.caption)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .background(.orange.opacity(0.15), in: Capsule())
+                    Spacer()
+                    Button("Keep") {
+                        Task { await session.toggle(seg.id) }
+                    }
+                    .font(.caption2)
+                    .buttonStyle(.borderless)
+                }
+            }
+        }
+        .padding(12)
+        .background(.background, in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    // MARK: - Segment strip (filmstrip + overlays + trim handles)
+
     private func segmentStrip(_ session: EditSession) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             GeometryReader { geo in
                 let w = geo.size.width
                 let dur = max(session.duration, 0.1)
                 ZStack(alignment: .leading) {
-                    // Filmstrip background
                     HStack(spacing: 0) {
                         ForEach(Array(session.filmstrip.enumerated()), id: \.offset) { _, img in
                             Image(nsImage: img)
@@ -277,7 +337,6 @@ struct LibraryView: View {
                     }
                     .frame(width: w, height: 44)
 
-                    // Keep/cut overlays
                     ForEach(session.segments) { seg in
                         let x = w * seg.start / dur
                         let sw = max(4, w * seg.length / dur)
@@ -307,7 +366,6 @@ struct LibraryView: View {
                                          seg.kept ? "cut it" : "bring it back"))
                     }
 
-                    // Trim handles at both ends
                     trimHandle(session, edge: .leading, width: w, duration: dur)
                     trimHandle(session, edge: .trailing, width: w, duration: dur)
                 }
@@ -321,8 +379,12 @@ struct LibraryView: View {
     }
 
     private enum TrimEdge { case leading, trailing }
-
     @State private var trimDrag: CGFloat = 0
+    @State private var activeTrimEdge: TrimEdge?
+
+    private func trimDragFor(_ edge: TrimEdge) -> CGFloat {
+        activeTrimEdge == edge ? trimDrag : 0
+    }
 
     private func trimHandle(_ session: EditSession, edge: TrimEdge,
                             width: CGFloat, duration: Double) -> some View {
@@ -356,13 +418,8 @@ struct LibraryView: View {
             )
     }
 
-    @State private var activeTrimEdge: TrimEdge?
+    // MARK: - Transcript
 
-    private func trimDragFor(_ edge: TrimEdge) -> CGFloat {
-        activeTrimEdge == edge ? trimDrag : 0
-    }
-
-    /// Loom-style "edit by transcript": delete a sentence, the video cuts it.
     private func transcriptPanel(_ session: EditSession) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             if session.isTranscribing {
@@ -378,35 +435,35 @@ struct LibraryView: View {
                 }
                 .font(.caption)
             } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 2) {
-                        ForEach(transcriptLines(session), id: \.start) { line in
-                            HStack(alignment: .top, spacing: 6) {
-                                Text(String(format: "%d:%02d", Int(line.start) / 60, Int(line.start) % 60))
-                                    .font(.caption2.monospacedDigit())
-                                    .foregroundStyle(.tertiary)
-                                    .frame(width: 32, alignment: .trailing)
-                                Text(line.text)
-                                    .font(.caption)
-                                Spacer(minLength: 4)
-                                Button {
-                                    Task { await session.markCut(from: line.start, to: line.end) }
-                                } label: {
-                                    Image(systemName: "scissors")
-                                }
-                                .buttonStyle(.borderless)
-                                .help("Cut this line from the video")
+                Label("Transcript", systemImage: "text.quote")
+                    .font(.subheadline.bold())
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(transcriptLines(session), id: \.start) { line in
+                        HStack(alignment: .top, spacing: 6) {
+                            Text(String(format: "%d:%02d", Int(line.start) / 60, Int(line.start) % 60))
+                                .font(.caption2.monospacedDigit())
+                                .foregroundStyle(.tertiary)
+                                .frame(width: 32, alignment: .trailing)
+                            Text(line.text)
+                                .font(.caption)
+                            Spacer(minLength: 4)
+                            Button {
+                                Task { await session.markCut(from: line.start, to: line.end) }
+                            } label: {
+                                Image(systemName: "scissors")
                             }
-                            .padding(.vertical, 2)
+                            .buttonStyle(.borderless)
+                            .help("Cut this line from the video")
                         }
+                        .padding(.vertical, 2)
                     }
                 }
-                .frame(maxHeight: 130)
             }
         }
+        .padding(12)
+        .background(.background, in: RoundedRectangle(cornerRadius: 12))
     }
 
-    /// Group word segments into readable lines for the transcript list.
     private func transcriptLines(_ session: EditSession) -> [(start: Double, end: Double, text: String)] {
         var lines: [(Double, Double, String)] = []
         var words: [String] = []
@@ -423,6 +480,8 @@ struct LibraryView: View {
         if let s, !words.isEmpty { lines.append((s, e, words.joined(separator: " "))) }
         return lines.map { (start: $0.0, end: $0.1, text: $0.2) }
     }
+
+    // MARK: - AI panel
 
     private func aiPanel(for item: VideoItem) -> some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -451,15 +510,12 @@ struct LibraryView: View {
                         recorder.selectedAgentID = recorder.agents.first?.id ?? ""
                     }
                 }
-                // Live connection status — green means edits will work.
                 let loggedIn = recorder.agentLoggedIn[recorder.selectedAgentID] ?? true
                 HStack(spacing: 6) {
                     Circle()
                         .fill(loggedIn ? Color.green : Color.orange)
                         .frame(width: 8, height: 8)
-                    Text(loggedIn
-                         ? "Connected — ready to edit"
-                         : "Not logged in yet")
+                    Text(loggedIn ? "Connected — ready to edit" : "Not logged in yet")
                         .font(.caption)
                         .foregroundStyle(loggedIn ? .secondary : .primary)
                 }
@@ -467,12 +523,10 @@ struct LibraryView: View {
                     Button {
                         RecorderEngine.openLogin(for: recorder.selectedAgentID)
                     } label: {
-                        Label(
-                            recorder.selectedAgentID == "codex"
-                                ? "Log in with ChatGPT" : "Log in",
-                            systemImage: "person.crop.circle.badge.checkmark"
-                        )
-                        .frame(maxWidth: .infinity)
+                        Label(recorder.selectedAgentID == "codex"
+                              ? "Log in with ChatGPT" : "Log in",
+                              systemImage: "person.crop.circle.badge.checkmark")
+                            .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
                     Text("Finish the login in Terminal, then come back — this turns green by itself.")
@@ -498,7 +552,7 @@ struct LibraryView: View {
                             let plan = try await editor.makePlan(
                                 url: item.url, agent: agent, instruction: extra
                             )
-                            await session.apply(keep: plan.keep)
+                            await session.apply(keep: plan.keep, cuts: plan.cuts)
                         } catch {
                             errorText = error.localizedDescription
                         }
@@ -550,7 +604,6 @@ struct LibraryView: View {
                     }
                 }
 
-                // Post panel — everything you need to publish
                 if !editor.lastTitle.isEmpty || exportedURL != nil {
                     Divider()
                     Text("Post it").font(.caption.bold())
@@ -580,10 +633,8 @@ struct LibraryView: View {
                     .font(.caption)
                 }
             }
-            Spacer()
         }
-        .padding(14)
-        .background(.purple.opacity(0.07), in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(.purple.opacity(0.25)))
+        .padding(12)
+        .background(.background, in: RoundedRectangle(cornerRadius: 12))
     }
 }

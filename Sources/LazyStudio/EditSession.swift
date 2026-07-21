@@ -12,6 +12,8 @@ final class EditSession: ObservableObject {
         var start: Double
         var end: Double
         var kept: Bool
+        /// Why the AI cut this piece ("silence", "retake"…), if it did.
+        var note: String?
         var length: Double { end - start }
     }
 
@@ -88,19 +90,26 @@ final class EditSession: ObservableObject {
         transcript = (try? await Transcriber.transcribe(url: url)) ?? []
     }
 
-    /// Turn an AI keep-plan into visible kept/cut segments.
-    func apply(keep: [AIEditor.EditPlan.Range]) async {
+    /// Turn an AI keep-plan into visible kept/cut segments, labeling each
+    /// cut with the AI's reason so the editor can show WHY.
+    func apply(keep: [AIEditor.EditPlan.Range], cuts: [AIEditor.EditPlan.Cut]? = nil) async {
         var segs: [Segment] = []
         var cursor = 0.0
+        func reason(for s: Double, _ e: Double) -> String? {
+            let mid = (s + e) / 2
+            return cuts?.first { mid >= $0.start && mid <= $0.end }?.reason
+        }
         for r in keep.sorted(by: { $0.start < $1.start }) {
             let s = max(cursor, min(r.start, duration))
             let e = max(s, min(r.end, duration))
-            if s > cursor + 0.05 { segs.append(Segment(start: cursor, end: s, kept: false)) }
+            if s > cursor + 0.05 {
+                segs.append(Segment(start: cursor, end: s, kept: false, note: reason(for: cursor, s)))
+            }
             if e > s { segs.append(Segment(start: s, end: e, kept: true)) }
             cursor = max(cursor, e)
         }
         if cursor < duration - 0.05 {
-            segs.append(Segment(start: cursor, end: duration, kept: false))
+            segs.append(Segment(start: cursor, end: duration, kept: false, note: reason(for: cursor, duration)))
         }
         if !segs.isEmpty { segments = segs }
         await rebuildPreview()

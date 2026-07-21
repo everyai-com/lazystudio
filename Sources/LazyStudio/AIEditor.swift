@@ -51,7 +51,9 @@ final class AIEditor: ObservableObject {
 
     struct EditPlan: Decodable {
         struct Range: Decodable { let start: Double; let end: Double }
+        struct Cut: Decodable { let start: Double; let end: Double; let reason: String }
         let keep: [Range]
+        let cuts: [Cut]?
         let title: String
         let description: String
     }
@@ -113,8 +115,8 @@ final class AIEditor: ObservableObject {
 
         Also write a catchy YouTube title and a 2-3 sentence description.
 
-        Reply with ONLY this JSON, no markdown fences, no commentary:
-        {"keep": [{"start": 0.0, "end": 12.5}], "title": "...", "description": "..."}
+        Reply with ONLY this JSON, no markdown fences, no commentary. For every gap you remove, add it to "cuts" with a 2-4 word reason (e.g. "silence", "false start", "retake of intro"):
+        {"keep": [{"start": 0.0, "end": 12.5}], "cuts": [{"start": 12.5, "end": 20.1, "reason": "silence"}], "title": "...", "description": "..."}
 
         Transcript:
         \(transcript)\(extra)
