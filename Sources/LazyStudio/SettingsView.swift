@@ -70,6 +70,36 @@ struct SettingsView: View {
                     }
             }
 
+            Section("Agent access (MCP)") {
+                Text("LazyStudio runs a local MCP server — your agents can edit your videos directly and the strip updates live. Connect once:")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                LabeledContent("Server") {
+                    Text("http://127.0.0.1:\(String(MCPServer.port))/mcp")
+                        .font(.caption.monospaced())
+                        .textSelection(.enabled)
+                }
+                HStack {
+                    Button("Copy Claude Code command") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(
+                            "claude mcp add --transport http lazystudio http://127.0.0.1:\(String(MCPServer.port))/mcp",
+                            forType: .string
+                        )
+                    }
+                    Button("Copy Codex config") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(
+                            "[mcp_servers.lazystudio]\nurl = \"http://127.0.0.1:\(String(MCPServer.port))/mcp\"",
+                            forType: .string
+                        )
+                    }
+                }
+                Text("Then just say: “edit my last LazyStudio recording, keep it under 2 minutes.”")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Updates") {
                 LabeledContent("Version", value: recorder.updater.currentVersion)
                 HStack {

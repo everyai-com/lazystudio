@@ -71,6 +71,13 @@ final class LibraryModel: ObservableObject {
 }
 
 struct LibraryView: View {
+    /// The session agents (MCP) talk to — mirrors what the UI shows.
+    @MainActor static var activeSession: EditSession?
+    @MainActor static func adopt(session: EditSession) {
+        activeSession = session
+        NotificationCenter.default.post(name: .lsAdoptSession, object: session)
+    }
+
     @ObservedObject var recorder: RecorderEngine
     @ObservedObject var editor: AIEditor
     @StateObject private var model = LibraryModel()
@@ -79,6 +86,7 @@ struct LibraryView: View {
     @State private var confirmDelete: VideoItem?
     @State private var errorText = ""
     @State private var exportedURL: URL?
+    @State private var adoptedSession: EditSession?
 
     init(recorder: RecorderEngine) {
         self.recorder = recorder
@@ -97,13 +105,27 @@ struct LibraryView: View {
             model.selected = nil
             model.refresh(dir: recorder.recordingsDirectory)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .lsAdoptSession)) { note in
+            // An agent (via MCP) started editing a video — show it.
+            guard let s = note.object as? EditSession else { return }
+            adoptedSession = s
+            model.refresh(dir: recorder.recordingsDirectory)
+            model.selected = model.items.first { $0.url == s.url }
+        }
         .onChange(of: model.selected) { _, item in
             session?.player.pause()
             errorText = ""
             exportedURL = nil
-            guard let item else { session = nil; return }
+            guard let item else { session = nil; Self.activeSession = nil; return }
+            if let adopted = adoptedSession, adopted.url == item.url {
+                session = adopted
+                Self.activeSession = adopted
+                adoptedSession = nil
+                return
+            }
             let s = EditSession(url: item.url)
             session = s
+            Self.activeSession = s
             Task { await s.load() }
         }
         .onChange(of: editor.isPolishing) { _, polishing in

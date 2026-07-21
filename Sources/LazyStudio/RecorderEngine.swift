@@ -80,6 +80,7 @@ final class RecorderEngine: NSObject, ObservableObject {
             Task { @MainActor in await self?.start() }
         }
         MainWindow.recorder = self
+        MCPServer.shared.start(recorder: self)
         // Agent detection shells out (`command -v`), so keep it off the main thread.
         Task { [weak self] in
             let found = await Task.detached { AgentCLI.detectAll() }.value

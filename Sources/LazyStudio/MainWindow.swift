@@ -46,6 +46,7 @@ enum MainWindow {
 
 extension Notification.Name {
     static let lsShowVideos = Notification.Name("lazystudio.showVideos")
+    static let lsAdoptSession = Notification.Name("lazystudio.adoptSession")
 }
 
 /// Closing the panel turns off the camera preview (unless recording) —
