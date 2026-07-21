@@ -796,17 +796,36 @@ struct LibraryView: View {
                     Text("Bold, punchy captions burned in — plus .srt/.vtt files for YouTube either way.")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
                     if burnCaptions {
-                        Picker("Style", selection: $captionStyle) {
+                        // Wrapping chips, not a segmented control — five styles
+                        // never fit 290pt side-by-side.
+                        let columns = [GridItem(.adaptive(minimum: 78), spacing: 6)]
+                        LazyVGrid(columns: columns, alignment: .leading, spacing: 6) {
                             ForEach(EditSession.CaptionStyle.allCases) { s in
-                                Text(s.label).tag(s.rawValue)
+                                let selected = captionStyle == s.rawValue
+                                Button {
+                                    captionStyle = s.rawValue
+                                } label: {
+                                    Text(s.label)
+                                        .font(.caption2.weight(selected ? .bold : .regular))
+                                        .lineLimit(1)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 5)
+                                        .background(
+                                            selected ? Theme.accent.opacity(0.35) : Color.white.opacity(0.07),
+                                            in: Capsule()
+                                        )
+                                        .overlay(Capsule().strokeBorder(
+                                            selected ? Theme.accent : .clear, lineWidth: 1))
+                                }
+                                .buttonStyle(.plain)
                             }
                         }
-                        .pickerStyle(.segmented)
-                        .controlSize(.small)
                         Text(styleBlurb)
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     Toggle(isOn: $socialExport) {
                         Label("Optimized for social (1080p)", systemImage: "sparkles.tv")
@@ -814,9 +833,10 @@ struct LibraryView: View {
                     }
                     .toggleStyle(.switch)
                     .controlSize(.mini)
-                    Text("1080p H.264 — what YouTube, TikTok & Instagram want; looks sharper after their re-compression and uploads much faster. Off = full retina resolution.")
+                    Text("1080p H.264 — what social platforms want; sharper after their re-compression, much faster uploads.")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
                     HStack {
                         Button {
                             Task {
