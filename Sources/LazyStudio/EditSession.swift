@@ -334,6 +334,12 @@ final class EditSession: ObservableObject {
         let comp = try await Self.composition(asset: AVURLAsset(url: url), keep: keptRanges)
         let output = destination ?? url.deletingPathExtension().appendingPathExtension("edited.mp4")
         try? FileManager.default.removeItem(at: output)
+        // Export into a hidden temp file and move it into place when done —
+        // a half-written mp4 sitting at the destination is a QuickTime
+        // "file isn't compatible" error waiting for a double-click.
+        let staging = FileManager.default.temporaryDirectory
+            .appendingPathComponent("lazystudio-export-\(UUID().uuidString).mp4")
+        defer { try? FileManager.default.removeItem(at: staging) }
         // Social: 1080p H.264 — retina captures are 4–5K wide and platforms
         // just re-compress them badly; a clean 1080p upload looks sharper on
         // YouTube/TikTok/Instagram and is a fraction of the size.
@@ -345,7 +351,13 @@ final class EditSession: ObservableObject {
         if burnCaptions, !transcript.isEmpty {
             exporter.videoComposition = try await captionComposition(for: comp)
         }
-        try await exporter.export(to: output, as: .mp4)
+        try await exporter.export(to: staging, as: .mp4)
+        do {
+            try FileManager.default.moveItem(at: staging, to: output)
+        } catch {
+            // Cross-volume move can fail — fall back to copy.
+            try FileManager.default.copyItem(at: staging, to: output)
+        }
 
         // Sidecar captions for YouTube (.srt) and web players (.vtt) either way.
         if !transcript.isEmpty {
