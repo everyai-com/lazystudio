@@ -898,6 +898,37 @@ struct LibraryView: View {
                         Button("Undo all") { Task { await session.revert() } }
                             .disabled(session.isExporting)
                     }
+                    if session.isExporting {
+                        HStack(spacing: 8) {
+                            ProgressView().controlSize(.small)
+                            Text("Exporting — you can keep working…").font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    // Unmissable "here's your file" card the moment export lands.
+                    if let exportedURL {
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Saved to Movies ▸ LazyStudio").font(.caption.bold())
+                                Text(exportedURL.lastPathComponent)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                Button {
+                                    NSWorkspace.shared.activateFileViewerSelecting([exportedURL])
+                                } label: {
+                                    Label("Show in Finder", systemImage: "folder")
+                                }
+                                .controlSize(.small)
+                            }
+                        }
+                        .padding(8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(.green.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+                    }
                 }
 
                 if !editor.lastTitle.isEmpty || exportedURL != nil {
@@ -930,12 +961,6 @@ struct LibraryView: View {
                                 }
                             }
                         }
-                        .font(.caption)
-                    }
-                    if let exportedURL {
-                        Button {
-                            NSWorkspace.shared.activateFileViewerSelecting([exportedURL])
-                        } label: { Label("Show edited video", systemImage: "folder") }
                         .font(.caption)
                     }
                     Button {
