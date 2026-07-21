@@ -339,6 +339,15 @@ struct LibraryView: View {
                     PlayerView(player: session.player)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .background(Color.black)
+                        .overlay(alignment: .bottom) {
+                            // Live subtitle preview: picking a style shows it
+                            // right here, no export needed.
+                            if burnCaptions {
+                                CaptionPreviewOverlay(session: session)
+                                    .padding(.bottom, 26)
+                                    .allowsHitTesting(false)
+                            }
+                        }
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                     segmentStrip(session)
                 }
@@ -879,5 +888,46 @@ struct LibraryView: View {
         }
         .padding(12)
         .lsCard(radius: 12)
+    }
+}
+
+/// Live rendering of the burned-subtitle styles over the preview player —
+/// same blocks, same pacing, same colors as the real export.
+struct CaptionPreviewOverlay: View {
+    @ObservedObject var session: EditSession
+    @AppStorage("captionStyle") private var styleRaw = EditSession.CaptionStyle.boldPop.rawValue
+
+    var body: some View {
+        let style = EditSession.CaptionStyle(rawValue: styleRaw) ?? .boldPop
+        if let cap = session.liveCaption(at: session.playhead) {
+            let visible = cap.words.filter { !style.popIn || $0.spoken }
+            if !visible.isEmpty {
+                text(for: visible, style: style)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, style.boxColor != nil ? 14 : 0)
+                    .padding(.vertical, style.boxColor != nil ? 8 : 0)
+                    .background {
+                        if let bg = style.boxColor {
+                            RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: bg))
+                        }
+                    }
+                    .padding(.horizontal, 20)
+            }
+        }
+    }
+
+    private func text(for words: [(text: String, spoken: Bool, current: Bool)],
+                      style: EditSession.CaptionStyle) -> some View {
+        let joined = words.reduce(Text("")) { acc, w in
+            let color: Color = w.current && style.highlight != nil
+                ? Color(nsColor: style.highlight!) : Color(nsColor: style.textColor)
+            let piece = Text(w.text).foregroundColor(color)
+            return acc == Text("") ? piece : acc + Text(" ") + piece
+        }
+        return joined
+            .font(.system(size: style == .hormozi ? 26 : style == .minimal ? 14 : 20,
+                          weight: style.weight == .heavy ? .heavy : .semibold))
+            .shadow(color: style.strokes ? .black : .clear, radius: 1, x: 1, y: 1)
+            .shadow(color: style.strokes ? .black : .clear, radius: 1, x: -1, y: -1)
     }
 }

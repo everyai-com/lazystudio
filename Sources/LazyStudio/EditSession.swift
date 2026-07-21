@@ -412,17 +412,35 @@ final class EditSession: ObservableObject {
         return nil
     }
 
-    private struct CaptionWord { let start: Double; let text: String }
-    private struct CaptionBlock {
+    struct CaptionWord { let start: Double; let text: String }
+    struct CaptionBlock {
         let start: Double
         var end: Double
         let words: [CaptionWord]
     }
 
+    /// What the caption looks like at this moment of playback — the editor
+    /// overlays it live so picking a style shows instantly, before export.
+    struct LiveCaption {
+        /// (word, already spoken, is the word being spoken right now)
+        let words: [(text: String, spoken: Bool, current: Bool)]
+    }
+
+    func liveCaption(at sourceT: Double) -> LiveCaption? {
+        guard !transcript.isEmpty, let t = playerTime(fromSource: sourceT) else { return nil }
+        guard let block = captionBlocks().first(where: { t >= $0.start && t < $0.end })
+        else { return nil }
+        let starts = block.words.map(\.start)
+        return LiveCaption(words: block.words.enumerated().map { i, w in
+            let next = i + 1 < starts.count ? starts[i + 1] : block.end
+            return (w.text, w.start <= t, w.start <= t && t < next)
+        })
+    }
+
     /// Short 3–5 word blocks, like good social captions — not paragraphs.
     /// Splits on real pauses and sentence ends so blocks read naturally,
     /// and keeps per-word timing for the TikTok-style pop-in.
-    private func captionBlocks() -> [CaptionBlock] {
+    func captionBlocks() -> [CaptionBlock] {
         var blocks: [CaptionBlock] = []
         var words: [CaptionWord] = []
         var s: Double?
