@@ -300,12 +300,21 @@ struct ChatEditorView: View {
 /// Player + simple live strip that re-renders as the agent edits.
 private struct SessionPreview: View {
     @ObservedObject var session: EditSession
+    @AppStorage("burnCaptions") private var burnCaptions = true
 
     var body: some View {
         VStack(spacing: 10) {
             PlayerView(player: session.player)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color.black)
+                .overlay(alignment: .bottom) {
+                    // Same live subtitle preview as My Videos.
+                    if burnCaptions {
+                        CaptionPreviewOverlay(session: session)
+                            .padding(.bottom, 22)
+                            .allowsHitTesting(false)
+                    }
+                }
                 .clipShape(RoundedRectangle(cornerRadius: 12))
             GeometryReader { geo in
                 let w = geo.size.width

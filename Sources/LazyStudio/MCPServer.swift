@@ -286,7 +286,12 @@ final class MCPServer {
             if let s = LibraryView.activeSession, s.url == u { session = s }
             else { session = EditSession(url: u); await session.load() }
             do {
-                let out = try await session.export()
+                // Honor the same subtitle/social switches as the export panel.
+                let d = UserDefaults.standard
+                let out = try await session.export(
+                    burnCaptions: d.object(forKey: "burnCaptions") as? Bool ?? true,
+                    social: d.object(forKey: "socialExport") as? Bool ?? true
+                )
                 return text("Exported: \(out.path)")
             } catch { return text("Export failed: \(error.localizedDescription)") }
 
