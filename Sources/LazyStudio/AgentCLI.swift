@@ -63,19 +63,33 @@ struct AgentCLI: Identifiable, Sendable {
     /// its exit code is always 0, so parse the text.)
     func isLoggedIn() async -> Bool {
         guard id == "codex" else { return true }
+        // Source of truth when the CLI can't answer: the file-based auth
+        // that `codex login` writes (cli_auth_credentials_store = "file").
+        let authFileExists = FileManager.default.fileExists(
+            atPath: "\(NSHomeDirectory())/.codex/auth.json")
+
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: path)
         proc.arguments = ["login", "status"]
+        // Same PATH fix as runArgs — codex is `#!/usr/bin/env node`, and a
+        // GUI app's bare PATH has no node. Without this the check errored
+        // with "env: node: No such file" and the answer was garbage.
+        var env = ProcessInfo.processInfo.environment
+        env["PATH"] = (env["PATH"] ?? "")
+            + ":/opt/homebrew/bin:/usr/local/bin:\(NSHomeDirectory())/.local/bin:\(NSHomeDirectory())/.npm-global/bin"
+        proc.environment = env
         let pipe = Pipe()
         proc.standardOutput = pipe
         proc.standardError = pipe
-        do { try proc.run() } catch { return false }
+        do { try proc.run() } catch { return authFileExists }
         return await withCheckedContinuation { cont in
             DispatchQueue.global(qos: .utility).async {
                 let data = pipe.fileHandleForReading.readDataToEndOfFile()
                 proc.waitUntilExit()
                 let out = String(decoding: data, as: UTF8.self).lowercased()
-                cont.resume(returning: !out.contains("not logged in"))
+                if out.contains("not logged in") { cont.resume(returning: false) }
+                else if out.contains("logged in") { cont.resume(returning: true) }
+                else { cont.resume(returning: authFileExists) } // CLI mute → trust the file
             }
         }
     }
@@ -137,7 +151,7 @@ struct AgentCLI: Identifiable, Sendable {
             proc.arguments = args
             proc.currentDirectoryURL = FileManager.default.temporaryDirectory
             var env = ProcessInfo.processInfo.environment
-            env["PATH"] = (env["PATH"] ?? "") + ":/opt/homebrew/bin:/usr/local/bin:\(NSHomeDirectory())/.local/bin"
+            env["PATH"] = (env["PATH"] ?? "") + ":/opt/homebrew/bin:/usr/local/bin:\(NSHomeDirectory())/.local/bin:\(NSHomeDirectory())/.npm-global/bin"
             proc.environment = env
 
             let out = Pipe()
