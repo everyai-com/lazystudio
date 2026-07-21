@@ -476,13 +476,33 @@ struct LibraryView: View {
                 }
                 .buttonStyle(.borderless)
                 .keyboardShortcut(.space, modifiers: [])
+                Button {
+                    Task { await session.splitAtPlayhead() }
+                } label: { Image(systemName: "square.split.diagonal") }
+                .buttonStyle(.borderless)
+                .keyboardShortcut("s", modifiers: [])
+                .help("Split at playhead (S) — then click a piece to cut it")
+                Button {
+                    Task { await session.undo() }
+                } label: { Image(systemName: "arrow.uturn.backward") }
+                .buttonStyle(.borderless)
+                .keyboardShortcut("z", modifiers: .command)
+                .disabled(!session.canUndo)
+                .help("Undo (⌘Z)")
+                Button {
+                    Task { await session.redo() }
+                } label: { Image(systemName: "arrow.uturn.forward") }
+                .buttonStyle(.borderless)
+                .keyboardShortcut("z", modifiers: [.command, .shift])
+                .disabled(!session.canRedo)
+                .help("Redo (⇧⌘Z)")
                 Text(String(format: "%d:%02d / %d:%02d",
                             Int(session.playhead) / 60, Int(session.playhead) % 60,
                             Int(session.duration) / 60, Int(session.duration) % 60))
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
                 Spacer()
-                Text("Space to play · click the bar to seek · click a piece to cut/restore")
+                Text("Space play · S split · click a piece to cut/restore · ⌘Z undo")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }

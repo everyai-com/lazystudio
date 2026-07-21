@@ -130,6 +130,7 @@ final class EditSession: ObservableObject {
     func markCut(from s: Double, to e: Double) async {
         let s = max(0, min(s, duration)), e = max(s, min(e, duration))
         guard e - s > 0.05 else { return }
+        pushUndo()
         var out: [Segment] = []
         for seg in segments {
             if seg.end <= s || seg.start >= e { out.append(seg); continue }
@@ -152,6 +153,7 @@ final class EditSession: ObservableObject {
     /// Turn an AI keep-plan into visible kept/cut segments, labeling each
     /// cut with the AI's reason so the editor can show WHY.
     func apply(keep: [AIEditor.EditPlan.Range], cuts: [AIEditor.EditPlan.Cut]? = nil) async {
+        pushUndo()
         var segs: [Segment] = []
         var cursor = 0.0
         func reason(for s: Double, _ e: Double) -> String? {
@@ -174,9 +176,56 @@ final class EditSession: ObservableObject {
         await rebuildPreview()
     }
 
+    // MARK: - Undo / redo (value-type snapshots — cheap, reliable)
+
+    @Published var canUndo = false
+    @Published var canRedo = false
+    private var undoStack: [[Segment]] = []
+    private var redoStack: [[Segment]] = []
+
+    private func pushUndo() {
+        undoStack.append(segments)
+        if undoStack.count > 100 { undoStack.removeFirst() }
+        redoStack.removeAll()
+        canUndo = true
+        canRedo = false
+    }
+
+    func undo() async {
+        guard let prev = undoStack.popLast() else { return }
+        redoStack.append(segments)
+        segments = prev
+        canUndo = !undoStack.isEmpty
+        canRedo = true
+        await rebuildPreview()
+    }
+
+    func redo() async {
+        guard let next = redoStack.popLast() else { return }
+        undoStack.append(segments)
+        segments = next
+        canUndo = true
+        canRedo = !redoStack.isEmpty
+        await rebuildPreview()
+    }
+
+    /// Split the segment under the playhead (OpenCut/CapCut "S") — then any
+    /// piece can be cut or kept on its own.
+    func splitAtPlayhead() async {
+        let t = playhead
+        guard let i = segments.firstIndex(where: { t > $0.start + 0.15 && t < $0.end - 0.15 })
+        else { return }
+        pushUndo()
+        let seg = segments[i]
+        segments[i] = Segment(start: seg.start, end: t, kept: seg.kept, note: seg.note)
+        segments.insert(Segment(start: t, end: seg.end, kept: seg.kept, note: seg.note), at: i + 1)
+        await rebuildPreview()
+    }
+
     /// Click a segment to cut it or bring it back.
     func toggle(_ id: Segment.ID) async {
         guard let i = segments.firstIndex(where: { $0.id == id }) else { return }
+        pushUndo()
         segments[i].kept.toggle()
         await rebuildPreview()
     }
