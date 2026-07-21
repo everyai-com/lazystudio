@@ -2,13 +2,15 @@ import SwiftUI
 
 /// LazyStudio design system — one place for the brand look.
 enum Theme {
-    static let purple = Color(red: 0.55, green: 0.27, blue: 0.98)
-    static let indigo = Color(red: 0.29, green: 0.15, blue: 0.66)
-    static let coral = Color(red: 1.0, green: 0.30, blue: 0.33)
-    static let coralDeep = Color(red: 0.85, green: 0.16, blue: 0.28)
+    /// Warm tungsten studio palette: brass accent, cream text, red only
+    /// for Record. Restraint is the taste — one warm accent, one signal red.
+    static let accent = Color(red: 0.89, green: 0.65, blue: 0.29)      // brass
+    static let accentDeep = Color(red: 0.68, green: 0.44, blue: 0.16)  // dark brass
+    static let coral = Color(red: 0.95, green: 0.30, blue: 0.25)
+    static let coralDeep = Color(red: 0.78, green: 0.17, blue: 0.16)
 
     static var brandGradient: LinearGradient {
-        LinearGradient(colors: [purple, indigo],
+        LinearGradient(colors: [accent, accentDeep],
                        startPoint: .topLeading, endPoint: .bottomTrailing)
     }
 
@@ -25,15 +27,17 @@ extension Theme {
     struct Studio: View {
         var body: some View {
             ZStack {
+                // Warm charcoal, like a studio at night.
                 LinearGradient(
                     colors: [
-                        Color(red: 0.085, green: 0.075, blue: 0.125),
-                        Color(red: 0.045, green: 0.04, blue: 0.07),
+                        Color(red: 0.11, green: 0.10, blue: 0.09),
+                        Color(red: 0.055, green: 0.05, blue: 0.045),
                     ],
                     startPoint: .top, endPoint: .bottom
                 )
+                // Tungsten key light from above.
                 RadialGradient(
-                    colors: [Theme.purple.opacity(0.13), .clear],
+                    colors: [Theme.accent.opacity(0.10), .clear],
                     center: UnitPoint(x: 0.5, y: -0.1),
                     startRadius: 0, endRadius: 520
                 )

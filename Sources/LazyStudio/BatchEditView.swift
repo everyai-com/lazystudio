@@ -62,7 +62,7 @@ struct BatchEditView: View {
                     if let s = status[item.url] {
                         Text(s)
                             .font(.caption)
-                            .foregroundStyle(s.hasPrefix("Done") ? .green : s == "Editing…" ? .purple : .secondary)
+                            .foregroundStyle(s.hasPrefix("Done") ? .green : s == "Editing…" ? Theme.accent : .secondary)
                     }
                 }
                 .padding(.vertical, 2)
@@ -82,7 +82,7 @@ struct BatchEditView: View {
                         .padding(.vertical, 6)
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(.purple)
+                .tint(Theme.accent)
                 .disabled(picked.isEmpty || running || recorder.activeAgent == nil)
                 if running {
                     ProgressView().controlSize(.small)

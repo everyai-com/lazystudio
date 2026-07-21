@@ -52,7 +52,7 @@ private struct WelcomeView: View {
         VStack(spacing: 18) {
             Image(systemName: "sparkles.tv.fill")
                 .font(.system(size: 44))
-                .foregroundStyle(.purple)
+                .foregroundStyle(Theme.accent)
             Text("LazyStudio lives in your menu bar")
                 .font(.title2.bold())
             Text("Look for the ⏺ icon at the top-right of your screen.\nOne click to record — AI does the editing.")

@@ -59,7 +59,7 @@ struct ChatEditorView: View {
             HStack {
                 Label("AI Editor", systemImage: "wand.and.stars")
                     .font(.headline)
-                    .foregroundStyle(.purple)
+                    .foregroundStyle(Theme.accent)
                 Spacer()
                 Button {
                     if let url = pickedURL { store.clear(for: url) }
@@ -111,8 +111,8 @@ struct ChatEditorView: View {
                                         .font(.caption2)
                                         .padding(.horizontal, 8)
                                         .padding(.vertical, 3)
-                                        .background(.purple.opacity(0.1), in: Capsule())
-                                        .foregroundStyle(.purple)
+                                        .background(Theme.accent.opacity(0.1), in: Capsule())
+                                        .foregroundStyle(Theme.accent)
                                 }
                             }
                             .id(msg.id)

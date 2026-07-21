@@ -163,7 +163,7 @@ struct LibraryView: View {
                     VStack(spacing: 12) {
                         ZStack {
                             Circle()
-                                .fill(Theme.purple.opacity(0.1))
+                                .fill(Theme.accent.opacity(0.1))
                                 .frame(width: 84, height: 84)
                             Image(systemName: "film.stack")
                                 .font(.system(size: 36))
@@ -267,10 +267,10 @@ struct LibraryView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .overlay(
                     RoundedRectangle(cornerRadius: 12)
-                        .strokeBorder(hovering ? Theme.purple.opacity(0.6) : .white.opacity(0.09),
+                        .strokeBorder(hovering ? Theme.accent.opacity(0.6) : .white.opacity(0.09),
                                       lineWidth: hovering ? 1.5 : 1)
                 )
-                .shadow(color: hovering ? Theme.purple.opacity(0.25) : .black.opacity(0.3),
+                .shadow(color: hovering ? Theme.accent.opacity(0.25) : .black.opacity(0.3),
                         radius: hovering ? 14 : 8, y: 4)
                 .scaleEffect(hovering ? 1.015 : 1)
                 // Hover fires constantly — keep it fast, no bounce.
@@ -299,8 +299,8 @@ struct LibraryView: View {
                         .font(.caption.bold())
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)
-                        .background(.purple.opacity(0.14), in: Capsule())
-                        .foregroundStyle(.purple)
+                        .background(Theme.accent.opacity(0.14), in: Capsule())
+                        .foregroundStyle(Theme.accent)
                 }
                 Spacer()
                 Button {
@@ -546,7 +546,7 @@ struct LibraryView: View {
         VStack(alignment: .leading, spacing: 12) {
             Label("LazyStudio AI", systemImage: "sparkles")
                 .font(.headline)
-                .foregroundStyle(.purple)
+                .foregroundStyle(Theme.accent)
 
             if recorder.agents.isEmpty {
                 Text("Connect an AI to edit your videos — it uses your existing subscription, no API keys.")
@@ -621,7 +621,7 @@ struct LibraryView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(.purple)
+                .tint(Theme.accent)
                 .disabled(editor.isPolishing || session == nil)
 
                 if editor.isPolishing {

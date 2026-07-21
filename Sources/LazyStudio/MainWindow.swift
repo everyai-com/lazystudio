@@ -98,7 +98,7 @@ private struct AppShellView: View {
             switch self {
             case .record: "record.circle.fill"
             case .videos: "film.stack.fill"
-            case .edit: "wand.and.stars"
+            case .edit: "scissors"
             }
         }
     }
@@ -110,7 +110,7 @@ private struct AppShellView: View {
                     Text(p.rawValue)
                 } icon: {
                     Image(systemName: p.icon)
-                        .foregroundStyle(pane == p ? Theme.purple : Color.secondary)
+                        .foregroundStyle(pane == p ? Theme.accent : Color.secondary)
                 }
                 .tag(p)
             }
@@ -120,7 +120,7 @@ private struct AppShellView: View {
                         RoundedRectangle(cornerRadius: 8)
                             .fill(Theme.brandGradient)
                             .frame(width: 30, height: 30)
-                        Image(systemName: "sparkles.tv.fill")
+                        Image(systemName: "video.fill")
                             .font(.footnote)
                             .foregroundStyle(.white)
                     }
@@ -176,8 +176,8 @@ private struct MainView: View {
                         Circle()
                             .fill(Theme.brandGradient)
                             .frame(width: 54, height: 54)
-                            .shadow(color: Theme.purple.opacity(0.5), radius: 12, y: 4)
-                        Image(systemName: "sparkles.tv.fill")
+                            .shadow(color: Theme.accent.opacity(0.5), radius: 12, y: 4)
+                        Image(systemName: "video.fill")
                             .font(.title2)
                             .foregroundStyle(.white)
                     }
@@ -252,11 +252,11 @@ private struct MainView: View {
         return HStack(spacing: 10) {
             ZStack {
                 Circle()
-                    .fill(active ? Theme.purple.opacity(0.15) : Color.gray.opacity(0.12))
+                    .fill(active ? Theme.accent.opacity(0.15) : Color.gray.opacity(0.12))
                     .frame(width: 28, height: 28)
                 Image(systemName: icon)
                     .font(.caption)
-                    .foregroundStyle(active ? Theme.purple : .secondary)
+                    .foregroundStyle(active ? Theme.accent : .secondary)
             }
             Text(name)
                 .font(.callout.weight(.medium))
@@ -267,11 +267,11 @@ private struct MainView: View {
                     .toggleStyle(.switch)
                     .controlSize(.small)
                     .labelsHidden()
-                    .tint(Theme.purple)
+                    .tint(Theme.accent)
             } else {
                 Image(systemName: "checkmark")
                     .font(.caption.bold())
-                    .foregroundStyle(Theme.purple)
+                    .foregroundStyle(Theme.accent)
             }
         }
         .padding(.horizontal, 10)

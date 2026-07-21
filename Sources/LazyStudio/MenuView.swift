@@ -48,7 +48,7 @@ struct MenuView: View {
             // AI brain indicator — auto-detected, zero setup
             HStack(spacing: 6) {
                 Image(systemName: "sparkles")
-                    .foregroundStyle(recorder.agents.isEmpty ? .secondary : Color.purple)
+                    .foregroundStyle(recorder.agents.isEmpty ? .secondary : Theme.accent)
                 if let agent = recorder.activeAgent {
                     Text("Auto-polish with \(agent.displayName)")
                 } else {

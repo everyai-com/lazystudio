@@ -97,7 +97,7 @@ private struct ResultView: View {
                             .padding(.vertical, 6)
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(.purple)
+                    .tint(Theme.accent)
                     .disabled(recorder.agents.isEmpty)
                     .help(recorder.agents.isEmpty
                           ? "Install Claude Code or Codex first"
