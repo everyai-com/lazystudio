@@ -205,14 +205,27 @@ final class MCPServer {
 
         case "set_keep_ranges":
             guard let u = url(for: args["video"] as? String ?? "") else { return text("Video not found") }
-            guard let raw = args["ranges"] as? [[Any]] else { return text("Bad ranges") }
-            let ranges = raw.compactMap { pair -> AIEditor.EditPlan.Range? in
-                guard pair.count == 2,
-                      let a = (pair[0] as? NSNumber)?.doubleValue,
-                      let b = (pair[1] as? NSNumber)?.doubleValue, b > a else { return nil }
-                return .init(start: a, end: b)
+            // Models send ranges as [[0,10]] OR [{"start":0,"end":10}] —
+            // accept both; rejecting a valid edit over shape is how
+            // "the AI isn't working" happens.
+            var ranges: [AIEditor.EditPlan.Range] = []
+            if let raw = args["ranges"] as? [[Any]] {
+                ranges = raw.compactMap { pair in
+                    guard pair.count == 2,
+                          let a = (pair[0] as? NSNumber)?.doubleValue,
+                          let b = (pair[1] as? NSNumber)?.doubleValue, b > a else { return nil }
+                    return .init(start: a, end: b)
+                }
+            } else if let raw = args["ranges"] as? [[String: Any]] {
+                ranges = raw.compactMap { dict in
+                    guard let a = (dict["start"] as? NSNumber)?.doubleValue,
+                          let b = (dict["end"] as? NSNumber)?.doubleValue, b > a else { return nil }
+                    return .init(start: a, end: b)
+                }
             }
-            guard !ranges.isEmpty else { return text("Bad ranges") }
+            guard !ranges.isEmpty else {
+                return text("Bad ranges — send [[startSec, endSec], …] or [{\"start\":s,\"end\":e}, …] with end > start")
+            }
             let session: EditSession
             if let s = LibraryView.activeSession, s.url == u {
                 session = s
